@@ -1,2 +1,2 @@
-defmodule RethinkdbEcto do
+defmodule RethinkDB.Ecto do
 end

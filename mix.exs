@@ -1,4 +1,4 @@
-defmodule RethinkdbEcto.Mixfile do
+defmodule RethinkDB.Ecto.Mixfile do
   use Mix.Project
 
   def project do
