@@ -8,6 +8,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     from(query)
     |> where(query, params)
     |> order_by(query, params)
+    |> offset(query)
     |> limit(query)
     |> select(query, params)
   end
@@ -51,6 +52,12 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   defp limit(reql, %Query{limit: limit}) do
     ReQL.limit(reql, limit.expr)
+  end
+
+  defp offset(reql, %Query{offset: nil}), do: reql
+
+  defp offset(reql, %Query{offset: offset}) do
+    ReQL.skip(reql, offset.expr)
   end
 
   defp select(reql, %Query{select: %SelectExpr{expr: expr}}, params) when is_list(expr) do
