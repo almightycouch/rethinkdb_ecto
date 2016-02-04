@@ -66,9 +66,11 @@ defmodule RethinkDB.Ecto do
 
   defp run(query, repo, fields, preprocess) when is_function(preprocess) do
     case repo.run(query) do
+      %RethinkDB.Record{data: data} ->
+        {1, [[data]]}
       %RethinkDB.Collection{data: data} ->
-        {count, records} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, fields), &2 + 1})
-        {records, count}
+        {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, fields), &2 + 1})
+        {count, records}
     end
   end
 

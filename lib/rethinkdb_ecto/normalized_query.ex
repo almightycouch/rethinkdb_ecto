@@ -1,12 +1,13 @@
 defmodule RethinkDB.Ecto.NormalizedQuery do
   alias Ecto.Query
-  alias Ecto.Query.QueryExpr
+  alias Ecto.Query.{QueryExpr, SelectExpr}
 
   alias RethinkDB.Query, as: ReQL
 
   def all(query, params) do
     from(query)
     |> where(query, params)
+    |> select(query, params)
   end
 
   def insert(model, fields) do
@@ -27,6 +28,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   defp from(%{source: {_prefix, table}}), do: ReQL.table(table)
+
   defp from(%Query{from: {table, _model}}), do: ReQL.table(table)
 
   defp where(reql, %Query{wheres: wheres}, params) do
@@ -35,10 +37,31 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end)
   end
 
-  defp filter(_, {:^, _, [index]}, params), do: Enum.at(params, index)
-  defp filter(record, {{:., _, [{:&, _, [0]}, field]}, _, _}, _), do: ReQL.bracket(record, field)
+  defp select(reql, %Query{select: %SelectExpr{expr: expr}}, params) when is_list(expr) do
+    ReQL.with_fields(reql, Enum.map(expr, &extract_arg(&1, params)))
+  end
+
+  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, _} = expr}}, params) when not is_atom(op) do
+    ReQL.get_field(reql, extract_arg(expr, params))
+  end
+
+  defp select(reql, %Query{select: %SelectExpr{expr: {:&, _, _}}}, _params), do: reql
+
+  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, args}}}, params) do
+    [field|args] = Enum.map(args, &extract_arg(&1, params))
+    aggregate(ReQL.bracket(reql, field), op, List.first(args))
+  end
+
+  defp aggregate(reql, :count, :distinct) do
+    ReQL.distinct(reql) |> ReQL.count()
+  end
+
+  defp aggregate(reql, op, nil) do
+    apply(ReQL, op, [reql])
+  end
+
   defp filter(record, {op, _, args}, params) do
-    args = Enum.map(args, &filter(record, &1, params))
+    args = Enum.map(args, &extract_arg(&1, params, record))
     case op do
       :==  -> apply(ReQL, :eq, args)
       :!=  -> apply(ReQL, :ne, args)
@@ -52,5 +75,10 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
       :not -> apply(ReQL, :not_r, args)
     end
   end
-  defp filter(_, expr, _), do: expr
+
+  defp extract_arg(expr, params, record \\ nil)
+  defp extract_arg({:^, _, [index]}, params, _), do: Enum.at(params, index)
+  defp extract_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _, record), do: if record, do: ReQL.bracket(record, field), else: field
+  defp extract_arg(expr, params, record) when is_tuple(expr), do: filter(record, expr, params)
+  defp extract_arg(expr, _, _), do: expr
 end
