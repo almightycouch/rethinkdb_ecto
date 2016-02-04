@@ -40,7 +40,7 @@ defmodule RethinkDB.Ecto do
   def prepare(func, query), do: {:nocache, {func, query}}
 
   def execute(repo, meta, {func, query}, params, preprocess, _opts) do
-    query = apply(NormalizedQuery, func, [query, params])
+    apply(NormalizedQuery, func, [query, params])
     |> run(repo, meta.select.fields, preprocess)
   end
 
