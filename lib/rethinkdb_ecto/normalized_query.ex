@@ -7,6 +7,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   def all(query, params) do
     from(query)
     |> where(query, params)
+    |> limit(query)
     |> select(query, params)
   end
 
@@ -35,6 +36,12 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     Enum.reduce(wheres, reql, fn (%QueryExpr{expr: expr}, reql) ->
       ReQL.filter(reql, &filter(&1, expr, params))
     end)
+  end
+
+  defp limit(reql, %Query{limit: nil}), do: reql
+
+  defp limit(reql, %Query{limit: limit}) do
+    ReQL.limit(reql, limit.expr)
   end
 
   defp select(reql, %Query{select: %SelectExpr{expr: expr}}, params) when is_list(expr) do

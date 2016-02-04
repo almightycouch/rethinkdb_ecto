@@ -2,6 +2,8 @@ defmodule RethinkDB.EctoTest do
   use ExUnit.Case
   doctest RethinkDB.Ecto
 
+  import Ecto.Query, only: [from: 2]
+
   defmodule Repo do
     use Ecto.Repo, otp_app: :rethinkdb_ecto
   end
@@ -13,6 +15,7 @@ defmodule RethinkDB.EctoTest do
 
     schema "users" do
       field :name, :string
+      field :age, :integer
     end
   end
 
@@ -28,9 +31,11 @@ defmodule RethinkDB.EctoTest do
   end
 
   test "insert, update, delete" do
-    user = Repo.insert! %User{name: "Mario"}
-    user = Ecto.Changeset.change user, name: "Boxer"
-    user = Repo.update! user
-    Repo.delete user
+    query = from u in User,
+          where: u.age > 21,
+          limit: 2,
+         select: u.name
+    Repo.all(query)
+    |> IO.inspect
   end
 end
