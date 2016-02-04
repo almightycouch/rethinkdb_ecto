@@ -7,6 +7,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   def all(query, params) do
     from(query)
     |> where(query, params)
+    |> order_by(query, params)
     |> limit(query)
     |> select(query, params)
   end
@@ -35,6 +36,14 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp where(reql, %Query{wheres: wheres}, params) do
     Enum.reduce(wheres, reql, fn (%QueryExpr{expr: expr}, reql) ->
       ReQL.filter(reql, &filter(&1, expr, params))
+    end)
+  end
+
+  defp order_by(reql, %Query{order_bys: order_bys}, params) do
+    Enum.reduce(order_bys, reql, fn (%QueryExpr{expr: expr}, reql) ->
+      Enum.reduce(expr, reql, fn ({order, arg}, reql) ->
+        ReQL.order_by(reql, apply(ReQL, order, [extract_arg(arg, params)]))
+      end)
     end)
   end
 
