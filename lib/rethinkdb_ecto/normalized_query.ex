@@ -1,11 +1,15 @@
 defmodule RethinkDB.Ecto.NormalizedQuery do
   alias Ecto.Query
-  alias Ecto.Query.{QueryExpr, SelectExpr}
+  alias Ecto.Query.{QueryExpr, SelectExpr, JoinExpr}
+  alias Ecto.Association
+
+  import RethinkDB.Lambda
 
   alias RethinkDB.Query, as: ReQL
 
   def all(query, params) do
     from(query)
+    |> join(query, params)
     |> where(query, params)
     |> order_by(query, params)
     |> offset(query)
@@ -34,9 +38,18 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   defp from(%Query{from: {table, _model}}), do: ReQL.table(table)
 
+  defp join(reql, %Query{joins: joins, from: {right_table, right_model}}, params) do
+    Enum.reduce(joins, reql, fn (%JoinExpr{source: {left_table, left_model}, on: on}, reql) ->
+      {field, related_key} = resolve_assoc(left_model, right_model)
+      ReQL.table(left_table)
+      |> ReQL.eq_join(related_key, ReQL.table(right_table))
+      |> ReQL.map(lambda &ReQL.merge(&1["right"], %{field => &1["left"]}))
+    end)
+  end
+
   defp where(reql, %Query{wheres: wheres}, params) do
     Enum.reduce(wheres, reql, fn (%QueryExpr{expr: expr}, reql) ->
-      ReQL.filter(reql, &filter(&1, expr, params))
+      ReQL.filter(reql, &evaluate(expr, params, [&1]))
     end)
   end
 
@@ -61,7 +74,11 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   defp select(reql, %Query{select: %SelectExpr{expr: expr}}, params) when is_list(expr) do
-    ReQL.with_fields(reql, Enum.map(expr, &extract_arg(&1, params)))
+    fields = Enum.map(expr, &extract_arg(&1, params))
+    ReQL.map(reql, fn record ->
+      Enum.map(fields, &ReQL.bracket(record, &1))
+    end)
+  # ReQL.with_fields(reql, Enum.map(expr, &extract_arg(&1, params)))
   end
 
   defp select(reql, %Query{select: %SelectExpr{expr: {op, _, _} = expr}}, params) when not is_atom(op) do
@@ -83,8 +100,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     apply(ReQL, op, [reql])
   end
 
-  defp filter(record, {op, _, args}, params) do
-    args = Enum.map(args, &extract_arg(&1, params, record))
+  defp evaluate({op, _, args}, params, records) do
+    args = Enum.map(args, &extract_arg(&1, params, records))
     case op do
       :==  -> apply(ReQL, :eq, args)
       :!=  -> apply(ReQL, :ne, args)
@@ -99,9 +116,17 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end
   end
 
-  defp extract_arg(expr, params, record \\ nil)
-  defp extract_arg({:^, _, [index]}, params, _), do: Enum.at(params, index)
-  defp extract_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _, record), do: if record, do: ReQL.bracket(record, field), else: field
-  defp extract_arg(expr, params, record) when is_tuple(expr), do: filter(record, expr, params)
-  defp extract_arg(expr, _, _), do: expr
+  defp resolve_assoc(left_model, right_model) do
+    Enum.find_value(right_model.__schema__(:associations), fn assoc ->
+      %Association.Has{field: field, related: related, related_key: related_key} = right_model.__schema__(:association, assoc)
+      if related == left_model, do: {field, related_key}
+    end)
+  end
+
+  defp extract_arg(expr, params, records \\ [])
+  defp extract_arg({:^, _, [index]}, params, _records), do: Enum.at(params, index)
+  defp extract_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _params, []), do: field
+  defp extract_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, records), do: ReQL.bracket(Enum.at(records, index), field)
+  defp extract_arg({_op, _, _args} = expr, params, records), do: evaluate(expr, params, records)
+  defp extract_arg(expr, _params, _records), do: expr
 end

@@ -66,28 +66,34 @@ defmodule RethinkDB.Ecto do
 
   defp run(query, repo, fields, preprocess) when is_function(preprocess) do
     case repo.run(query) do
-      %RethinkDB.Record{data: data} ->
-        {1, [[data]]}
-      %RethinkDB.Collection{data: data} ->
-        {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, fields), &2 + 1})
-        {count, records}
+      %{data: data} ->
+        if is_list(data) do
+          {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, fields), &2 + 1})
+          {count, records}
+        else
+          {1, [[data]]}
+        end
     end
   end
 
   defp run(query, repo, fields, autogenerate_id) do
     case repo.run(query) do
-      %RethinkDB.Response{data: %{"r" => [error|_]}} ->
+      %{data: %{"r" => [error|_]}} ->
         {:invalid, [error: error]}
-      %RethinkDB.Record{data: %{"first_error" => error}} ->
+      %{data: %{"first_error" => error}} ->
         {:invalid, [error: error]}
-      %RethinkDB.Record{data: %{"generated_keys" => [id|_]}} ->
+      %{data: %{"generated_keys" => [id|_]}} ->
         {:ok, Keyword.put(fields, elem(autogenerate_id, 0), id)}
-      %RethinkDB.Record{data: _data} ->
+      %{data: _data} ->
         {:ok, fields}
     end
   end
 
-  defp process_record(record, preprocess, fields) do
-    Enum.map(fields, &preprocess.(&1, record, nil))
+  defp process_record(record, preprocess, expr) when is_list(record) do
+    preprocess.(expr, record, nil)
+  end
+
+  defp process_record(record, preprocess, expr) do
+    Enum.map(expr, &preprocess.(&1, record, nil))
   end
 end
