@@ -159,9 +159,22 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
       :or  -> apply(ReQL, :or_r, args)
       :not -> apply(ReQL, :not_r, args)
       :is_nil -> apply(ReQL, :ne, args ++ [nil])
-      :field -> apply(ReQL, :bracket, args)
+      :field  -> apply(ReQL, :bracket, args)
+      :like   -> like(args)
+      :ilike  -> like(args, true)
       _ -> {op, args}
     end
+  end
+
+  defp like([field, match], caseless \\ false) do
+    regex = Regex.escape(match)
+    if String.first(regex) != "%", do: regex = "^" <> regex
+    if String.last(regex) != "%", do: regex = regex <> "%"
+    regex =
+      String.strip(regex, ?%)
+      |> Regex.compile!(if caseless, do: "i", else: "")
+      |> IO.inspect
+    apply(ReQL, :match, [field, regex])
   end
 
   defp resolve_assoc(left_model, right_model) do
