@@ -15,6 +15,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     |> offset(query)
     |> limit(query)
     |> select(query, params)
+    |> distinct(query, params)
   end
 
   def insert(model, fields) do
@@ -51,6 +52,12 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     Enum.reduce(wheres, reql, fn (%QueryExpr{expr: expr}, reql) ->
       ReQL.filter(reql, &evaluate(expr, params, [&1]))
     end)
+  end
+
+  defp distinct(reql, %Query{distinct: nil}, params), do: reql
+
+  defp distinct(reql, %Query{distinct: %QueryExpr{expr: true}}, params) do
+    ReQL.distinct(reql)
   end
 
   defp order_by(reql, %Query{order_bys: order_bys}, params) do
