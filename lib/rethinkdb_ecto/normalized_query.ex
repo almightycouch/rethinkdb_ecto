@@ -73,21 +73,59 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     ReQL.skip(reql, offset.expr)
   end
 
-  defp select(reql, %Query{select: %SelectExpr{expr: expr}}, params) when is_list(expr) do
-    fields = Enum.map(expr, &extract_arg(&1, params))
-    ReQL.map(reql, fn record ->
-      Enum.map(fields, &ReQL.bracket(record, &1))
-    end)
-  # ReQL.with_fields(reql, Enum.map(expr, &extract_arg(&1, params)))
+  # Support for list
+  defp select(reql, %Query{select: %SelectExpr{expr: args}}, params) when is_list(args) do
+    do_select(reql, args, params)
   end
 
+  # Support for tuple
+  defp select(reql, %Query{select: %SelectExpr{expr: {:{}, _, args}}}, params) do
+    do_select(reql, args, params)
+  end
+
+  # Support for map
+  defp select(reql, %Query{select: %SelectExpr{expr: {:%{}, _, args}}}, params) do
+    ReQL.map(reql, fn record ->
+      Enum.into(args, [], fn {key, expr} ->
+        do_select(reql, record, extract_arg(expr, params), params)
+      end)
+    end)
+  end
+
+  # Support for entire model
+  defp select(reql, %Query{select: %SelectExpr{expr: {:&, _, _}}}, _params), do: reql
+
+  # Support for single field
   defp select(reql, %Query{select: %SelectExpr{expr: {op, _, _} = expr}}, params) when not is_atom(op) do
     ReQL.get_field(reql, extract_arg(expr, params))
   end
 
-  defp select(reql, %Query{select: %SelectExpr{expr: {:&, _, _}}}, _params), do: reql
-
+  # Support for aggregators
   defp select(reql, %Query{select: %SelectExpr{expr: {op, _, args}}}, params) do
+    aggregate(reql, op, args, params)
+  end
+
+  defp do_select(reql, args, params) do
+    fields = Enum.map(args, &extract_arg(&1, params))
+    ReQL.map(reql, fn record ->
+      Enum.map(fields, &do_select(reql, record, &1, params))
+    end)
+  end
+
+  defp do_select(reql, record, expr, params) do
+    case expr do
+      {:&, args} ->
+        record
+      {op, args} ->
+        aggregate(reql, op, args, params)
+      field when is_atom(field) ->
+        ReQL.bracket(record, field)
+      value ->
+        value
+    end
+  end
+
+  defp aggregate(reql, op, args, params) do
     [field|args] = Enum.map(args, &extract_arg(&1, params))
     aggregate(ReQL.bracket(reql, field), op, List.first(args))
   end
@@ -113,6 +151,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
       :and -> apply(ReQL, :and_r, args)
       :or  -> apply(ReQL, :or_r, args)
       :not -> apply(ReQL, :not_r, args)
+      _ -> {op, args}
     end
   end
 
