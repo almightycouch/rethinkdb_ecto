@@ -158,6 +158,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
       :and -> apply(ReQL, :and_r, args)
       :or  -> apply(ReQL, :or_r, args)
       :not -> apply(ReQL, :not_r, args)
+      :is_nil -> apply(ReQL, :ne, args ++ [nil])
       _ -> {op, args}
     end
   end
