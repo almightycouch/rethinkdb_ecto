@@ -73,9 +73,11 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end)
   end
 
-  defp group_by(reql, %Query{group_bys: group_bys}, params) do
-    Enum.reduce(group_bys, reql, fn %QueryExpr{expr: expr}, reql ->
-      Enum.reduce(expr, reql, &ReQL.group(&2, extract_arg(&1, params)))
+  defp group_by(reql, %Query{group_bys: groups}, params) do
+    Enum.reduce(groups, reql, fn %QueryExpr{expr: expr}, reql ->
+      reql
+      |> ReQL.group(Enum.map(expr, &extract_arg(&1, params)))
+      |> ReQL.ungroup()
     end)
   end
 
@@ -105,39 +107,54 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     ReQL.skip(reql, offset.expr)
   end
 
+  defp select(reql, %Query{select: nil}, params), do: reql
+
   # Support for list
-  defp select(reql, %Query{select: %SelectExpr{expr: args}}, params) when is_list(args) do
-    do_select(reql, args, params)
+  defp select(reql, %Query{select: %SelectExpr{expr: args}, group_bys: groups}, params) when is_list(args) do
+    do_select(reql, groups, args, params)
   end
 
   # Support for tuple
-  defp select(reql, %Query{select: %SelectExpr{expr: {:{}, _, args}}}, params) do
-    do_select(reql, args, params)
+  defp select(reql, %Query{select: %SelectExpr{expr: {:{}, _, args}}, group_bys: groups}, params) do
+    do_select(reql, groups, args, params)
   end
 
   # Support for map
-  defp select(reql, %Query{select: %SelectExpr{expr: {:%{}, _, args}}}, params) do
+  defp select(reql, %Query{select: %SelectExpr{expr: {:%{}, _, args}}, group_bys: groups}, params) do
     ReQL.map(reql, fn record ->
       Enum.into(args, [], fn {key, expr} ->
-        do_select(reql, record, extract_arg(expr, params), params)
+        do_select(reql, record, groups, extract_arg(expr, params), params)
       end)
     end)
   end
 
   # Support for entire model
-  defp select(reql, %Query{select: %SelectExpr{expr: {:&, _, _}}}, _params), do: reql
+  defp select(reql, %Query{select: %SelectExpr{expr: {:&, _, _}}, group_bys: []}, _params), do: reql
+
+  # Support for entire model (group_by)
+  defp select(reql, %Query{select: %SelectExpr{expr: {:&, _, _}}, group_bys: _groups}, _params) do
+    ReQL.concat_map(reql, &ReQL.bracket(&1, "reduction"))
+  end
 
   # Support for single field
-  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, _} = expr}}, params) when not is_atom(op) do
+  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, _} = expr}, group_bys: []}, params) when not is_atom(op) do
     ReQL.get_field(reql, extract_arg(expr, params))
   end
 
-  # Support for aggregators
-  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, args}}}, params) do
+  # Support for single field (group_by)
+  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, _} = expr}, group_bys: groups}, params) when not is_atom(op) do
+    ReQL.map(reql, &do_select(reql, &1, groups, extract_arg(expr, params), params))
+  end
+
+  # Support for aggregator
+  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, args}}, group_bys: []}, params) do
     aggregate(reql, op, args, params)
   end
 
-  defp select(reql, %Query{select: nil}, params), do: reql
+  # Support for aggregator (group_by)
+  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, args} = expr}, group_bys: groups}, params) do
+    ReQL.map(reql, &do_select(reql, &1, groups, extract_arg(expr, params), params))
+  end
 
   defp distinct(reql, %Query{distinct: nil}, params), do: reql
 
@@ -145,14 +162,14 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     ReQL.distinct(reql)
   end
 
-  defp do_select(reql, args, params) do
+  defp do_select(reql, groups, args, params) do
     fields = Enum.map(args, &extract_arg(&1, params))
     ReQL.map(reql, fn record ->
-      Enum.map(fields, &do_select(reql, record, &1, params))
+      Enum.map(fields, &do_select(reql, record, groups, &1, params))
     end)
   end
 
-  defp do_select(reql, record, expr, params) do
+  defp do_select(reql, record, [], expr, params) do
     case expr do
       {:&, args} ->
         record
@@ -162,6 +179,17 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
         ReQL.bracket(record, field)
       value ->
         value
+    end
+  end
+
+  defp do_select(reql, record, groups, expr, params) do
+    groups = Enum.flat_map(groups, fn %QueryExpr{expr: expr} -> Enum.map(expr, &extract_arg(&1, params)) end)
+    cond do
+      expr in groups ->
+        ReQL.bracket(record, "group")
+      expr ->
+        reduction = ReQL.bracket(record, "reduction")
+        do_select(reduction, reduction, [], expr, params)
     end
   end
 

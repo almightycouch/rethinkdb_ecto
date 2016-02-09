@@ -71,13 +71,10 @@ defmodule RethinkDB.Ecto do
 
   defp run(query, repo, {func, fields}, preprocess) when is_function(preprocess) do
     case repo.run(query) do
+      %{data: %{"r" => [error|_]}} ->
+        raise error
       %{data: data} when is_list(data) ->
         {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, fields), &2 + 1})
-        {count, records}
-      %{data: data} when is_map(data) ->
-        {records, count} =
-          Enum.flat_map(data, &elem(&1, 1))
-          |> Enum.map_reduce(0, &{process_record(&1, preprocess, fields), &2 + 1})
         {count, records}
       %{data: data} ->
         {1, [[data]]}
