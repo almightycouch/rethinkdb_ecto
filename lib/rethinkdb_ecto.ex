@@ -40,8 +40,13 @@ defmodule RethinkDB.Ecto do
   def prepare(func, query), do: {:nocache, {func, query}}
 
   def execute(repo, meta, {func, query}, params, preprocess, _opts) do
+    fields =
+      case meta.select do
+        nil -> []
+        select -> select.fields
+      end
     apply(NormalizedQuery, func, [query, params])
-    |> run(repo, {func, meta.select}, preprocess)
+    |> run(repo, {func, fields}, preprocess)
   end
 
   def insert(repo, meta, fields, autogenerate_id, _returning, _opts) do
@@ -64,11 +69,11 @@ defmodule RethinkDB.Ecto do
 
   def supports_ddl_transaction?, do: false
 
-  defp run(query, repo, {func, select}, preprocess) when is_function(preprocess) do
+  defp run(query, repo, {func, fields}, preprocess) when is_function(preprocess) do
     case repo.run(query) do
       %{data: data} ->
         if is_list(data) do
-          {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, select.fields), &2 + 1})
+          {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, fields), &2 + 1})
           {count, records}
         else
           {1, [[data]]}
@@ -76,14 +81,14 @@ defmodule RethinkDB.Ecto do
     end
   end
 
-  defp run(query, repo, {func, select}, autogenerate_id) do
+  defp run(query, repo, {func, fields}, autogenerate_id) do
     case repo.run(query) do
       %{data: %{"r" => [error|_]}} ->
         {:invalid, [error: error]}
       %{data: %{"first_error" => error}} ->
         {:invalid, [error: error]}
-      %{data: %{"generated_keys" => [id|_]}} ->
-        {:ok, Keyword.put(select.fields, elem(autogenerate_id, 0), id)}
+      %{data: %{"generated_keys" => [id|_]} = data} ->
+        {:ok, Keyword.put(fields, elem(autogenerate_id, 0), id)}
       %{data: data} ->
         case func do
           :update_all ->
@@ -91,7 +96,7 @@ defmodule RethinkDB.Ecto do
           :delete_all ->
             {data["deleted"], nil}
           _ ->
-            {:ok, select.fields}
+            {:ok, fields}
         end
     end
   end
