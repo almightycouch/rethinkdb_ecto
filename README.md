@@ -11,8 +11,9 @@ This is a work in progress, right now here's what is done:
   - [x] `all/2` and `one/2`
   - [ ] `preload/2`
   - [x] `insert/2`, `update/2` and `delete/2`
-  - [ ] `insert_or_update/2`
-  - [ ] `update_all/3`
+  - [x] `insert_or_update/2`
+  - [x] `update_all/3`
+  - [x] `delete_all/2`
   - [ ] `rollback/2` (not supported)
   - [ ] `transaction/2` (not supported)
 - [x] `Ecto.Query`
@@ -27,7 +28,7 @@ This is a work in progress, right now here's what is done:
   - [x] `order_by/3`
   - [ ] `preload/3`
   - [x] `select/3`
-  - [ ] `update/3`
+  - [x] `update/3`
   - [x] `where/2`
 - [x] `Ecto.Query.API`
   - [x] comparison operators
