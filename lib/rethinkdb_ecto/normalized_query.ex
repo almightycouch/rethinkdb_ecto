@@ -45,6 +45,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     from(query)
     |> join(query, params)
     |> where(query, params)
+    |> group_by(query, params)
     |> order_by(query, params)
     |> offset(query)
     |> limit(query)
@@ -71,17 +72,17 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end)
   end
 
-  defp distinct(reql, %Query{distinct: nil}, params), do: reql
-
-  defp distinct(reql, %Query{distinct: %QueryExpr{expr: true}}, params) do
-    ReQL.distinct(reql)
-  end
-
   defp order_by(reql, %Query{order_bys: order_bys}, params) do
     Enum.reduce(order_bys, reql, fn %QueryExpr{expr: expr}, reql ->
       Enum.reduce(expr, reql, fn {order, arg}, reql ->
         ReQL.order_by(reql, apply(ReQL, order, [extract_arg(arg, params)]))
       end)
+    end)
+  end
+
+  defp group_by(reql, %Query{group_bys: group_bys}, params) do
+    Enum.reduce(group_bys, reql, fn %QueryExpr{expr: expr}, reql ->
+      Enum.reduce(expr, reql, &ReQL.group(&2, extract_arg(&1, params)))
     end)
   end
 
@@ -130,6 +131,12 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   defp select(reql, %Query{select: nil}, params), do: reql
+
+  defp distinct(reql, %Query{distinct: nil}, params), do: reql
+
+  defp distinct(reql, %Query{distinct: %QueryExpr{expr: true}}, params) do
+    ReQL.distinct(reql)
+  end
 
   defp do_select(reql, args, params) do
     fields = Enum.map(args, &extract_arg(&1, params))
