@@ -19,8 +19,8 @@ This is a work in progress, right now here's what is done:
 - [x] `Ecto.Query`
   - [x] `distinct/2`
   - [x] `from/2`
-  - [ ] `group_by/3`
-  - [ ] `having/3`
+  - [x] `group_by/3`
+  - [x] `having/3`
   - [ ] `join/5`
   - [x] `limit/3`
   - [ ] `lock/2` (not supported)
