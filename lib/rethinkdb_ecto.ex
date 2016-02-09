@@ -41,22 +41,22 @@ defmodule RethinkDB.Ecto do
 
   def execute(repo, meta, {func, query}, params, preprocess, _opts) do
     apply(NormalizedQuery, func, [query, params])
-    |> run(repo, meta.select.fields, preprocess)
+    |> run(repo, {func, meta.select}, preprocess)
   end
 
   def insert(repo, meta, fields, autogenerate_id, _returning, _opts) do
     NormalizedQuery.insert(meta, fields)
-    |> run(repo, fields, autogenerate_id)
+    |> run(repo, {:insert, fields}, autogenerate_id)
   end
 
   def update(repo, meta, fields, filters, autogenerate_id, _returning, _opts) do
     NormalizedQuery.update(meta, fields, filters)
-    |> run(repo, fields, autogenerate_id)
+    |> run(repo, {:update, fields}, autogenerate_id)
   end
 
   def delete(repo, meta, filters, autogenerate_id, _opts) do
     NormalizedQuery.delete(meta, filters)
-    |> run(repo, [], autogenerate_id)
+    |> run(repo, {:delete, []}, autogenerate_id)
   end
 
   def storage_up(_opts), do: :ok
@@ -64,11 +64,11 @@ defmodule RethinkDB.Ecto do
 
   def supports_ddl_transaction?, do: false
 
-  defp run(query, repo, fields, preprocess) when is_function(preprocess) do
+  defp run(query, repo, {func, select}, preprocess) when is_function(preprocess) do
     case repo.run(query) do
       %{data: data} ->
         if is_list(data) do
-          {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, fields), &2 + 1})
+          {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, select.fields), &2 + 1})
           {count, records}
         else
           {1, [[data]]}
@@ -76,16 +76,23 @@ defmodule RethinkDB.Ecto do
     end
   end
 
-  defp run(query, repo, fields, autogenerate_id) do
+  defp run(query, repo, {func, select}, autogenerate_id) do
     case repo.run(query) do
       %{data: %{"r" => [error|_]}} ->
         {:invalid, [error: error]}
       %{data: %{"first_error" => error}} ->
         {:invalid, [error: error]}
       %{data: %{"generated_keys" => [id|_]}} ->
-        {:ok, Keyword.put(fields, elem(autogenerate_id, 0), id)}
-      %{data: _data} ->
-        {:ok, fields}
+        {:ok, Keyword.put(select.fields, elem(autogenerate_id, 0), id)}
+      %{data: data} ->
+        case func do
+          :update_all ->
+            IO.inspect data
+          :delete_all ->
+            {data["deleted"], nil}
+          _ ->
+            {:ok, select.fields}
+        end
     end
   end
 

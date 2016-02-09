@@ -8,14 +8,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   alias RethinkDB.Query, as: ReQL
 
   def all(query, params) do
-    from(query)
-    |> join(query, params)
-    |> where(query, params)
-    |> order_by(query, params)
-    |> offset(query)
-    |> limit(query)
-    |> select(query, params)
-    |> distinct(query, params)
+    do_query(query, params)
   end
 
   def insert(model, fields) do
@@ -29,10 +22,30 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     |> ReQL.update(Enum.into(fields, %{}))
   end
 
+  def update_all(query, params) do
+    do_query(query, params)
+  end
+
+  def delete_all(query, params) do
+    do_query(query, params)
+    |> ReQL.delete()
+  end
+
   def delete(model, filters) do
     from(model)
     |> ReQL.get(filters[:id])
     |> ReQL.delete()
+  end
+
+  defp do_query(query, params) do
+    from(query)
+    |> join(query, params)
+    |> where(query, params)
+    |> order_by(query, params)
+    |> offset(query)
+    |> limit(query)
+    |> select(query, params)
+    |> distinct(query, params)
   end
 
   defp from(%{source: {_prefix, table}}), do: ReQL.table(table)
@@ -112,6 +125,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     aggregate(reql, op, args, params)
   end
 
+  defp select(reql, %Query{select: nil}, params), do: reql
+
   defp do_select(reql, args, params) do
     fields = Enum.map(args, &extract_arg(&1, params))
     ReQL.map(reql, fn record ->
@@ -173,7 +188,6 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     regex =
       String.strip(regex, ?%)
       |> Regex.compile!(if caseless, do: "i", else: "")
-      |> IO.inspect
     apply(ReQL, :match, [field, regex])
   end
 
