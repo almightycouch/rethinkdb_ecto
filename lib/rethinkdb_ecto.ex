@@ -87,7 +87,7 @@ defmodule RethinkDB.Ecto do
       %{data: data} ->
         case func do
           :update_all ->
-            IO.inspect data
+            {data["replaced"], nil}
           :delete_all ->
             {data["deleted"], nil}
           _ ->

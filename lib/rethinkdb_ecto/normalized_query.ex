@@ -23,7 +23,11 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   def update_all(query, params) do
-    do_query(query, params)
+    Enum.reduce(query.updates, do_query(query, params), fn %QueryExpr{expr: expr}, reql ->
+      Enum.reduce(expr, reql, fn expr, reql ->
+        ReQL.update(reql, &evaluate(expr, params, [&1]))
+      end)
+    end)
   end
 
   def delete_all(query, params) do
@@ -53,7 +57,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp from(%Query{from: {table, _model}}), do: ReQL.table(table)
 
   defp join(reql, %Query{joins: joins, from: {right_table, right_model}}, params) do
-    Enum.reduce(joins, reql, fn (%JoinExpr{source: {left_table, left_model}, on: on}, reql) ->
+    Enum.reduce(joins, reql, fn %JoinExpr{source: {left_table, left_model}, on: on}, reql ->
       {field, related_key} = resolve_assoc(left_model, right_model)
       ReQL.table(left_table)
       |> ReQL.eq_join(related_key, ReQL.table(right_table))
@@ -62,7 +66,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   defp where(reql, %Query{wheres: wheres}, params) do
-    Enum.reduce(wheres, reql, fn (%QueryExpr{expr: expr}, reql) ->
+    Enum.reduce(wheres, reql, fn %QueryExpr{expr: expr}, reql ->
       ReQL.filter(reql, &evaluate(expr, params, [&1]))
     end)
   end
@@ -74,8 +78,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   defp order_by(reql, %Query{order_bys: order_bys}, params) do
-    Enum.reduce(order_bys, reql, fn (%QueryExpr{expr: expr}, reql) ->
-      Enum.reduce(expr, reql, fn ({order, arg}, reql) ->
+    Enum.reduce(order_bys, reql, fn %QueryExpr{expr: expr}, reql ->
+      Enum.reduce(expr, reql, fn {order, arg}, reql ->
         ReQL.order_by(reql, apply(ReQL, order, [extract_arg(arg, params)]))
       end)
     end)
@@ -160,6 +164,23 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     apply(ReQL, op, [reql])
   end
 
+  defp like([field, match], caseless \\ false) do
+    regex = Regex.escape(match)
+    if String.first(regex) != "%", do: regex = "^" <> regex
+    if String.last(regex) != "%", do: regex = regex <> "%"
+    regex =
+      String.strip(regex, ?%)
+      |> Regex.compile!(if caseless, do: "i", else: "")
+    apply(ReQL, :match, [field, regex])
+  end
+
+  defp resolve_assoc(left_model, right_model) do
+    Enum.find_value(right_model.__schema__(:associations), fn assoc ->
+      %Association.Has{field: field, related: related, related_key: related_key} = right_model.__schema__(:association, assoc)
+      if related == left_model, do: {field, related_key}
+    end)
+  end
+
   defp evaluate({op, _, args}, params, records) do
     args = Enum.map(args, &extract_arg(&1, params, records))
     case op do
@@ -181,20 +202,27 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end
   end
 
-  defp like([field, match], caseless \\ false) do
-    regex = Regex.escape(match)
-    if String.first(regex) != "%", do: regex = "^" <> regex
-    if String.last(regex) != "%", do: regex = regex <> "%"
-    regex =
-      String.strip(regex, ?%)
-      |> Regex.compile!(if caseless, do: "i", else: "")
-    apply(ReQL, :match, [field, regex])
+  defp evaluate({:set, args}, params, records) do
+    Enum.into(args, %{}, fn {key, arg} ->
+        {key, extract_arg(arg, params, records)}
+    end)
   end
 
-  defp resolve_assoc(left_model, right_model) do
-    Enum.find_value(right_model.__schema__(:associations), fn assoc ->
-      %Association.Has{field: field, related: related, related_key: related_key} = right_model.__schema__(:association, assoc)
-      if related == left_model, do: {field, related_key}
+  defp evaluate({:inc, args}, params, records) do
+    Enum.into(args, %{}, fn {key, arg} ->
+      {key, ReQL.add(ReQL.bracket(List.first(records), key), extract_arg(arg, params, records))}
+    end)
+  end
+
+  defp evaluate({:push, args}, params, records) do
+    Enum.into(args, %{}, fn {key, arg} ->
+      {key, ReQL.append(ReQL.bracket(List.first(records), key), extract_arg(arg, params, records))}
+    end)
+  end
+
+  defp evaluate({:pull, args}, params, records) do
+    Enum.into(args, %{}, fn {key, arg} ->
+      {key, ReQL.without(ReQL.bracket(List.first(records), key), extract_arg(arg, params, records))}
     end)
   end
 
