@@ -43,6 +43,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   defp normalize_query(query, params) do
     from(query)
+    |> join(query, params)
     |> where(query, params)
     |> group_by(query, params)
     |> having(query, params)
@@ -61,13 +62,34 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp from(%Query{from: {table, _model}}), do: ReQL.table(table)
 
   #
+  # join()
+  #
+
+  defp join(reql, %Query{joins: joins}, params) do
+    Enum.reduce(joins, reql, fn %JoinExpr{on: on, source: {table, model}}, reql ->
+      ReQL.inner_join(reql, ReQL.table(table), &evaluate(on.expr, params, [&1, &2]))
+      |> ReQL.map(&[ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")])
+    end)
+  end
+
+  #
   # where()
   #
 
-  defp where(reql, %Query{wheres: wheres}, params) do
+  defp where(reql, %Query{wheres: wheres, sources: sources}, params) do
     Enum.reduce(wheres, reql, fn %QueryExpr{expr: expr}, reql ->
-      ReQL.filter(reql, &evaluate(expr, params, [&1]))
+      ReQL.filter(reql, &evaluate(expr, params, resolve(&1, sources)))
     end)
+  end
+
+  defp resolve(reql, sources) do
+    if tuple_size(sources) == 1 do
+      [reql]
+    else
+      Enum.map_reduce(Tuple.to_list(sources), 0, fn _source, index ->
+        {ReQL.bracket(reql, index), index + 1}
+      end) |> elem(0)
+    end
   end
 
   #

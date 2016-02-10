@@ -101,8 +101,10 @@ defmodule RethinkDB.Ecto do
     end
   end
 
-  defp process_record(record, preprocess, expr) when is_list(record) do
-    preprocess.(expr, record, nil)
+  defp process_record(record, preprocess, args) when is_list(record) do
+    Enum.map_reduce(record, args, fn record, [expr|exprs] ->
+      {preprocess.(expr, record, nil), exprs}
+    end) |> elem(0)
   end
 
   defp process_record(record, preprocess, expr) do
