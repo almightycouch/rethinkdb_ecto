@@ -9,7 +9,7 @@ This is a work in progress, right now here's what is done:
 - [x] `Ecto.Repo`
   - [x] `get/3` and `get_by/3`
   - [x] `all/2` and `one/2`
-  - [ ] `preload/2`
+  - [x] `preload/2`
   - [x] `insert/2`, `update/2` and `delete/2`
   - [x] `insert_or_update/2`
   - [x] `update_all/3`
@@ -26,7 +26,7 @@ This is a work in progress, right now here's what is done:
   - [ ] `lock/2` (not supported)
   - [x] `offset/3`
   - [x] `order_by/3`
-  - [ ] `preload/3`
+  - [x] `preload/3`
   - [x] `select/3`
   - [x] `update/3`
   - [x] `where/2`
