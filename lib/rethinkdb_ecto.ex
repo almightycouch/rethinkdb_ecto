@@ -64,8 +64,31 @@ defmodule RethinkDB.Ecto do
     |> run(repo, {:delete, []}, autogenerate_id)
   end
 
-  def storage_up(_opts), do: :ok
-  def storage_down(_opts), do: :ok
+  def storage_up(opts) do
+    repo = opts[:repo]
+    name = opts[:database]
+    start_link(repo, [])
+
+    case(RethinkDB.Query.db_create(name) |> repo.run) do
+      %{data: %{"r" => [error|_]}} ->
+        raise error
+      %{data: %{"dbs_created" => 1}} ->
+        :ok
+    end
+  end
+
+  def storage_down(opts) do
+    repo = opts[:repo]
+    name = opts[:database]
+    start_link(repo, [])
+
+    case(RethinkDB.Query.db_drop(name) |> repo.run) do
+      %{data: %{"r" => [error|_]}} ->
+        raise error
+      %{data: %{"dbs_dropped" => 1}} ->
+        :ok
+    end
+  end
 
   def supports_ddl_transaction?, do: false
 
