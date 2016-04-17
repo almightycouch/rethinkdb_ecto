@@ -1,75 +1,78 @@
 defmodule RethinkDB.Ecto do
   alias RethinkDB.Ecto.NormalizedQuery
 
+  import RethinkDB.Query, only: [db_create: 1, db_drop: 1]
+
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Storage
 
   defmacro __before_compile__(env) do
-    module = env.module
+    pool = Module.concat(env.module, Pool)
     quote do
-      defmodule Connection do
-        use RethinkDB.Connection
+      def __pool__, do: unquote(pool)
+
+      def run(query, opts \\ []) do
+        RethinkDB.Connection.run(query, unquote(pool), opts)
       end
 
-      defdelegate run(query), to: Connection
-      defdelegate run(query, opts), to: Connection
+      def noreply_wait(timeout \\ 15_000) do
+        RethinkDB.Connection.noreply_wait(unquote(pool), timeout)
+      end
 
-      def __connection__, do: unquote(module).Connection
+      def stop do
+        RethinkDB.Connection.stop(unquote(pool))
+      end
+
+      defoverridable [__pool__: 0]
     end
   end
 
-  def start_link(repo, opts) do
-    {:ok, _} = Application.ensure_all_started(:rethinkdb)
-    repo.__connection__.start_link(opts)
+  def application() do
+    :rethinkdb_ecto
   end
 
-  def stop(repo, _pid, _timeout) do
-    repo.__connection__.stop()
+  def child_spec(repo, opts) do
+    opts = Keyword.put_new(opts, :name, repo.__pool__)
+    DBConnection.child_spec(RethinkDB.Connection, opts)
   end
 
-  def load(:binary_id, data), do: {:ok, data}
+  def autogenerate(:id), do: nil
 
-  def load(type, data), do: Ecto.Type.load(type, data, &load/2)
+  def autogenerate(:embed_id), do: Ecto.UUID.generate()
 
-  def dump(:binary_id, data), do: {:ok, data}
+  def autogenerate(:binary_id), do: Ecto.UUID.generate()
 
-  def dump(type, data), do: Ecto.Type.dump(type, data, &dump/2)
+  def loaders(_primitive, type), do: [type]
 
-  def embed_id(_), do: ""
+  def dumpers(_primitive, type), do: [type]
 
   def prepare(func, query), do: {:nocache, {func, query}}
 
-  def execute(repo, meta, {func, query}, params, preprocess, _opts) do
-    fields =
-      case meta.select do
-        nil -> []
-        select -> select.fields
-      end
+  def execute(repo, meta, {_cache, {func, query}}, params, preprocess, _opts) do
     apply(NormalizedQuery, func, [query, params])
-    |> run(repo, {func, fields}, preprocess)
+    |> run(repo, {func, meta.fields}, preprocess)
   end
 
-  def insert(repo, meta, fields, autogenerate_id, _returning, _opts) do
+  def insert(repo, meta, fields, _returning, _opts) do
     NormalizedQuery.insert(meta, fields)
-    |> run(repo, {:insert, fields}, autogenerate_id)
+    |> run(repo, {:insert, fields})
   end
 
-  def update(repo, meta, fields, filters, autogenerate_id, _returning, _opts) do
+  def update(repo, meta, fields, filters, _returning, _opts) do
     NormalizedQuery.update(meta, fields, filters)
-    |> run(repo, {:update, fields}, autogenerate_id)
+    |> run(repo, {:update, fields})
   end
 
-  def delete(repo, meta, filters, autogenerate_id, _opts) do
+  def delete(repo, meta, filters, _opts) do
     NormalizedQuery.delete(meta, filters)
-    |> run(repo, {:delete, []}, autogenerate_id)
+    |> run(repo, {:delete, []})
   end
 
   def storage_up(opts) do
     repo = opts[:repo]
     name = opts[:database]
-    start_link(repo, [])
 
-    case(RethinkDB.Query.db_create(name) |> repo.run) do
+    case repo.run(db_create(name)) do
       %{data: %{"r" => [error|_]}} ->
         raise error
       %{data: %{"dbs_created" => 1}} ->
@@ -80,9 +83,8 @@ defmodule RethinkDB.Ecto do
   def storage_down(opts) do
     repo = opts[:repo]
     name = opts[:database]
-    start_link(repo, [])
 
-    case(RethinkDB.Query.db_drop(name) |> repo.run) do
+    case repo.run(db_drop(name)) do
       %{data: %{"r" => [error|_]}} ->
         raise error
       %{data: %{"dbs_dropped" => 1}} ->
@@ -92,45 +94,33 @@ defmodule RethinkDB.Ecto do
 
   def supports_ddl_transaction?, do: false
 
-  defp run(query, repo, {func, fields}, preprocess) when is_function(preprocess) do
-    case repo.run(query) do
+  defp run(query, repo, {func, fields}, process) do
+    case RethinkDB.run(query, repo.__pool__) do
       %{data: %{"r" => [error|_]}} ->
         raise error
       %{data: data} when is_list(data) ->
-        {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, preprocess, fields), &2 + 1})
+        {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, process, fields), &2 + 1})
         {count, records}
       %{data: data} ->
         {1, [[data]]}
     end
   end
 
-  defp run(query, repo, {func, fields}, autogenerate_id) do
-    case repo.run(query) do
+  defp run(query, repo, {func, fields}) do
+    case RethinkDB.run(query, repo.__pool__) do
       %{data: %{"r" => [error|_]}} ->
         {:invalid, [error: error]}
-      %{data: %{"first_error" => error}} ->
-        {:invalid, [error: error]}
-      %{data: %{"generated_keys" => [id|_]} = data} ->
-        {:ok, Keyword.put(fields, elem(autogenerate_id, 0), id)}
       %{data: data} ->
-        case func do
-          :update_all ->
-            {data["replaced"], nil}
-          :delete_all ->
-            {data["deleted"], nil}
-          _ ->
-            {:ok, fields}
-        end
+        {:ok, fields}
     end
   end
 
-  defp process_record(record, preprocess, args) when is_list(record) do
-    Enum.map_reduce(record, args, fn record, [expr|exprs] ->
-      {preprocess.(expr, record, nil), exprs}
-    end) |> elem(0)
-  end
-
-  defp process_record(record, preprocess, expr) do
-    Enum.map(expr, &preprocess.(&1, record, nil))
+  defp process_record(record, process, ast) do
+    Enum.map(ast, fn {:&, _, [_, fields, _]} = expr ->
+      data = fields
+      |> Enum.map(&Atom.to_string/1)
+      |> Enum.map(&Map.fetch!(record, &1))
+      process.(expr, data, nil)
+    end)
   end
 end
