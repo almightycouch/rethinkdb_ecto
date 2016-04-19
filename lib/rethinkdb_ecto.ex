@@ -1,5 +1,6 @@
 defmodule RethinkDB.Ecto do
   alias RethinkDB.Ecto.NormalizedQuery
+  import RethinkDB.Query
 
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Storage
@@ -90,6 +91,33 @@ defmodule RethinkDB.Ecto do
     end
   end
 
+  def execute_ddl(repo, {:create_if_not_exists, %Ecto.Migration.Table{name: name}, _fields}, _opts) do
+    table_create(name) |> repo.run
+    :ok
+  end
+
+  def execute_ddl(repo, {:create, e = %Ecto.Migration.Table{name: name}, fields}, opts) do
+    options = e.options || %{}
+    database = e.prefix || repo.config[:database]
+    table_create(name, options) |> repo.run
+    :ok
+  end
+
+  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: [column], table: table}}, _opts) do
+    table(table) |> index_create(column) |> repo.run
+    :ok
+  end
+
+  def execute_ddl(repo, {:drop, e = %Ecto.Migration.Table{name: name}}, opts) do
+    table_drop(name) |> repo.run
+    :ok
+  end
+
+  def execute_ddl(repo, {:drop, %Ecto.Migration.Index{columns: [column], table: table}}, _opts) do
+    table(table) |> index_drop(column) |> repo.run
+    :ok
+  end
+
   def supports_ddl_transaction?, do: false
 
   defp run(query, repo, {func, fields}, preprocess) when is_function(preprocess) do
@@ -111,7 +139,11 @@ defmodule RethinkDB.Ecto do
       %{data: %{"first_error" => error}} ->
         {:invalid, [error: error]}
       %{data: %{"generated_keys" => [id|_]} = data} ->
-        {:ok, Keyword.put(fields, elem(autogenerate_id, 0), id)}
+        if autogenerate_id do
+          {:ok, Keyword.put(fields, elem(autogenerate_id, 0), id)}
+        else
+          {:ok, fields}
+        end
       %{data: data} ->
         case func do
           :update_all ->
