@@ -116,4 +116,11 @@ defmodule RethinkDB.EctoTest do
       Repo.get_by!(User, name: "Hugo")
     end
   end
+
+  test "insert without all fields" do
+    user = Repo.insert!(%User{name: "Hugo", age: 20})
+    assert user.name == "Hugo"
+    Repo.delete!(user)
+  end
+
 end
