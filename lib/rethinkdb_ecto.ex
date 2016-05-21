@@ -1,7 +1,6 @@
 defmodule RethinkDB.Ecto do
   alias RethinkDB.Ecto.NormalizedQuery
   import RethinkDB.Query
-
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Storage
 
@@ -51,6 +50,14 @@ defmodule RethinkDB.Ecto do
   end
 
   def insert(repo, meta, fields, autogenerate_id, _returning, _opts) do
+    fields = fields 
+    |> Enum.filter(fn {_, v} -> 
+      case v do
+        %Ecto.Query.Tagged{value: nil} -> false
+        _ -> true
+      end
+    end)
+    |> Enum.into([])
     NormalizedQuery.insert(meta, fields)
     |> run(repo, {:insert, fields}, autogenerate_id)
   end
