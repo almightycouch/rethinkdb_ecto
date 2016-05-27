@@ -1,7 +1,7 @@
 defmodule RethinkDB.Ecto do
   alias RethinkDB.Ecto.NormalizedQuery
 
-  import RethinkDB.Query, only: [db_create: 1, db_drop: 1]
+  import RethinkDB.Query
 
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Storage
@@ -70,31 +70,63 @@ defmodule RethinkDB.Ecto do
 
   def storage_up(opts) do
     repo = opts[:repo]
-    name = opts[:database]
+    name = opts[:database] || "test"
 
     case repo.run(db_create(name)) do
-      %{data: %{"r" => [error|_]}} ->
-        raise error
       %{data: %{"dbs_created" => 1}} ->
         :ok
+      %{data: %{"r" => [error|_]}} ->
+        {:error, error}
     end
   end
 
   def storage_down(opts) do
     repo = opts[:repo]
-    name = opts[:database]
+    name = opts[:database] || "test"
 
     case repo.run(db_drop(name)) do
-      %{data: %{"r" => [error|_]}} ->
-        raise error
       %{data: %{"dbs_dropped" => 1}} ->
         :ok
+      %{data: %{"r" => [error|_]}} ->
+        {:error, error}
     end
+  end
+
+ def execute_ddl(repo, {:create_if_not_exists, %Ecto.Migration.Table{name: name}, _fields}, _opts) do
+    table_create(name) |> repo.run
+    :ok
+  end
+
+  def execute_ddl(repo, {:create, e = %Ecto.Migration.Table{name: name}, _fields}, _opts) do
+    options = e.options || %{}
+    table_create(name, options)
+    |> repo.run
+    :ok
+  end
+
+  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: [column], table: table}}, _opts) do
+    table(table)
+    |> index_create(column)
+    |> repo.run
+    :ok
+  end
+
+  def execute_ddl(repo, {:drop, %Ecto.Migration.Table{name: name}}, _opts) do
+    table_drop(name)
+    |> repo.run
+    :ok
+  end
+
+  def execute_ddl(repo, {:drop, %Ecto.Migration.Index{columns: [column], table: table}}, _opts) do
+    table(table)
+    |> index_drop(column)
+    |> repo.run
+    :ok
   end
 
   def supports_ddl_transaction?, do: false
 
-  defp run(query, repo, {func, fields}, process) do
+  defp run(query, repo, {_func, fields}, process) do
     case RethinkDB.run(query, repo.__pool__) do
       %{data: %{"r" => [error|_]}} ->
         raise error
@@ -106,11 +138,11 @@ defmodule RethinkDB.Ecto do
     end
   end
 
-  defp run(query, repo, {func, fields}) do
+  defp run(query, repo, {_func, fields}) do
     case RethinkDB.run(query, repo.__pool__) do
       %{data: %{"r" => [error|_]}} ->
         {:invalid, [error: error]}
-      %{data: data} ->
+      %{data: _data} ->
         {:ok, fields}
     end
   end
