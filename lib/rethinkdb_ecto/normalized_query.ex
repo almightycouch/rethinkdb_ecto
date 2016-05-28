@@ -16,6 +16,11 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     |> ReQL.insert(Enum.into(fields, %{}))
   end
 
+  def insert_all(model, fields) do
+    from(model)
+    |> ReQL.insert(Enum.map(fields, &Enum.into(&1, %{})))
+  end
+
   def update(model, fields, filters) do
     from(model)
     |> ReQL.get(filters[:id])

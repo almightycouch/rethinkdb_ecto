@@ -58,6 +58,11 @@ defmodule RethinkDB.Ecto do
     |> run(repo, {:insert, fields})
   end
 
+  def insert_all(repo, meta, _header, fields, _returning, _opts) do
+    NormalizedQuery.insert_all(meta, fields)
+    |> run(repo, {:insert_all, fields})
+  end
+
   def update(repo, meta, fields, filters, _returning, _opts) do
     NormalizedQuery.update(meta, fields, filters)
     |> run(repo, {:update, fields})
@@ -138,20 +143,26 @@ defmodule RethinkDB.Ecto do
     end
   end
 
-  defp run(query, repo, {_func, fields}) do
+  defp run(query, repo, {func, fields}) do
     case RethinkDB.run(query, repo.__pool__) do
       %{data: %{"r" => [error|_]}} ->
         {:invalid, [error: error]}
-      %{data: _data} ->
-        {:ok, fields}
+      %{data: data} ->
+        case func do
+          :insert_all ->
+            {data["inserted"], nil}
+          _ ->
+            {:ok, fields}
+        end
     end
   end
 
   defp process_record(record, process, ast) do
     Enum.map(ast, fn {:&, _, [_, fields, _]} = expr ->
-      data = fields
-      |> Enum.map(&Atom.to_string/1)
-      |> Enum.map(&Map.fetch!(record, &1))
+      data =
+        fields
+        |> Enum.map(&Atom.to_string/1)
+        |> Enum.map(&Map.fetch!(record, &1))
       process.(expr, data, nil)
     end)
   end
