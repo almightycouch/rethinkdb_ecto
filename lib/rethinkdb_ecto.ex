@@ -28,21 +28,35 @@ defmodule RethinkDB.Ecto do
     repo.__connection__.stop()
   end
 
-  epoch = {{1970, 1, 1}, {0, 0, 0}}
-  @epoch :calendar.datetime_to_gregorian_seconds(epoch)
+  @epoch :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
+
+  defp encode_timestamp({{year, month, day}, {hour, min, sec, usec}})
+      when year <= @timestamp_max_year and hour in 0..23 and min in 0..59 and sec in 0..59 and usec in 0..999_999 do
+    datetime = {{year, month, day}, {hour, min, sec}}
+    secs = :calendar.datetime_to_gregorian_seconds(datetime) - @epoch
+    %RethinkDB.Pseudotypes.Time{epoch_time: secs + usec / 1_000, timezone: "+00:00"}
+  end
+
+  defp encode_timestamp(datetime = %Ecto.DateTime{}) do
+    {:ok, tuple} = Ecto.DateTime.dump(datetime)
+    encode_timestamp(tuple)
+  end
 
   def load(:binary_id, data), do: {:ok, data}
 
   def load(Ecto.DateTime, %RethinkDB.Pseudotypes.Time{epoch_time: timestamp}) do
-    timestamp
-    |> +(@epoch)
-    |> :calendar.gregorian_seconds_to_datetime
-    |> Ecto.DateTime.load
+    secs = trunc(timestamp)
+    usec = trunc((timestamp - secs) * 1_000_000)
+    {date, {hour, min, sec}} = :calendar.gregorian_seconds_to_datetime(secs + @epoch)
+    Ecto.DateTime.load {date, {hour, min, sec, usec}}
   end
 
   def load(type, data), do: Ecto.Type.load(type, data, &load/2)
 
   def dump(:binary_id, data), do: {:ok, data}
+
+  def dump(Ecto.DateTime, nil), do: Ecto.Type.dump(Ecto.DateTime, nil, &dump/2)
+  def dump(Ecto.DateTime, data), do: {:ok, encode_timestamp(data)}
 
   def dump(type, data), do: Ecto.Type.dump(type, data, &dump/2)
 
@@ -61,19 +75,29 @@ defmodule RethinkDB.Ecto do
   end
 
   def insert(repo, meta, fields, autogenerate_id, _returning, _opts) do
+    # filter out nil fields and encode timestamps. Tuple isn't a valid type, so tuple can only be timestamp
     fields = fields 
-    |> Enum.filter(fn {_, v} -> 
+    |> Enum.reduce([], fn {k, v}, acc -> 
       case v do
-        %Ecto.Query.Tagged{value: nil} -> false
-        _ -> true
+        %Ecto.Query.Tagged{value: nil} -> acc
+        {{year, month, day}, {hour, minute, sec, usec}} -> 
+          [{k, encode_timestamp({{year, month, day}, {hour, minute, sec, usec}})}| acc]
+        _ -> [{k, v}| acc]
       end
     end)
-    |> Enum.into([])
     NormalizedQuery.insert(meta, fields)
     |> run(repo, {:insert, fields}, autogenerate_id)
   end
 
   def update(repo, meta, fields, filters, autogenerate_id, _returning, _opts) do
+    fields = fields
+    |> Enum.reduce([], fn {k, v}, acc ->
+      case v do
+        {{year, month, day}, {hour, minute, sec, usec}} -> 
+          [{k, encode_timestamp({{year, month, day}, {hour, minute, sec, usec}})}| acc]
+        _ -> [{k, v}| acc]
+      end
+    end)
     NormalizedQuery.update(meta, fields, filters)
     |> run(repo, {:update, fields}, autogenerate_id)
   end
