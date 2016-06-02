@@ -1,5 +1,6 @@
 defmodule RethinkDB.Ecto do
   alias RethinkDB.Ecto.NormalizedQuery
+  alias RethinkDB.Pseudotypes.Time
   import RethinkDB.Query
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Storage
@@ -27,7 +28,17 @@ defmodule RethinkDB.Ecto do
     repo.__connection__.stop()
   end
 
+  epoch = {{1970, 1, 1}, {0, 0, 0}}
+  @epoch :calendar.datetime_to_gregorian_seconds(epoch)
+
   def load(:binary_id, data), do: {:ok, data}
+
+  def load(Ecto.DateTime, %RethinkDB.Pseudotypes.Time{epoch_time: timestamp}) do
+    timestamp
+    |> +(@epoch)
+    |> :calendar.gregorian_seconds_to_datetime
+    |> Ecto.DateTime.load
+  end
 
   def load(type, data), do: Ecto.Type.load(type, data, &load/2)
 
