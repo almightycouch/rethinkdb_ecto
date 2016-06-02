@@ -37,7 +37,7 @@ This is a work in progress, right now here's what is done:
   - [x] search functions
   - [x] null check function
   - [x] aggregators
-  - [ ] date/time intervals
+  - [x] date/time intervals
   - [ ] `fragment/1`
   - [x] `field/2`
   - [ ] `type/2`
