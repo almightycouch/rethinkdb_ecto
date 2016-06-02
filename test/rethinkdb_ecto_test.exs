@@ -18,6 +18,8 @@ defmodule RethinkDB.EctoTest do
       field :name, :string
       field :age, :integer
       field :in_relationship, :boolean
+      field :datetime, Ecto.DateTime
+      timestamps
     end
   end
 
@@ -123,4 +125,16 @@ defmodule RethinkDB.EctoTest do
     Repo.delete!(user)
   end
 
+  test "timestamps and datetime fields" do
+    user = Repo.insert!(%User{name: "Hugo", age: 20}) 
+    assert user.inserted_at
+    assert user.inserted_at == user.updated_at
+    now = Ecto.DateTime.utc
+    update_user = Repo.update!(cast(user, %{datetime: now}, ~w(datetime), ~w()))
+    assert update_user.datetime == now
+    load_user = Repo.get!(User, user.id)
+    assert load_user.inserted_at
+    assert load_user.datetime == now
+    Repo.delete!(user)
+  end
 end
