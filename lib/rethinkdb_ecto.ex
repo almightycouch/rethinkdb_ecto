@@ -53,24 +53,30 @@ defmodule RethinkDB.Ecto do
     |> run(repo, {func, meta.fields}, preprocess)
   end
 
-  def insert(repo, meta, fields, _returning, _opts) do
+  def insert(repo, meta, fields, returning, _opts) do
+    returning =
+      unless meta.schema.__schema__(:autogenerate_id) do
+        returning ++ meta.schema.__schema__(:primary_key)
+      else
+        returning
+      end
     NormalizedQuery.insert(meta, fields)
-    |> run(repo, {:insert, fields})
+    |> run(repo, {:insert, fields}, returning)
   end
 
-  def insert_all(repo, meta, _header, fields, _returning, _opts) do
+  def insert_all(repo, meta, _header, fields, returning, _opts) do
     NormalizedQuery.insert_all(meta, fields)
-    |> run(repo, {:insert_all, fields})
+    |> run(repo, {:insert_all, fields}, returning)
   end
 
-  def update(repo, meta, fields, filters, _returning, _opts) do
+  def update(repo, meta, fields, filters, returning, _opts) do
     NormalizedQuery.update(meta, fields, filters)
-    |> run(repo, {:update, fields})
+    |> run(repo, {:update, fields}, returning)
   end
 
   def delete(repo, meta, filters, _opts) do
     NormalizedQuery.delete(meta, filters)
-    |> run(repo, {:delete, []})
+    |> run(repo, {:delete, []}, [])
   end
 
   def storage_up(opts) do
@@ -131,6 +137,22 @@ defmodule RethinkDB.Ecto do
 
   def supports_ddl_transaction?, do: false
 
+  defp run(query, repo, {func, fields}, returning) when is_list(returning) do
+    case RethinkDB.run(query, repo.__pool__) do
+      %{data: %{"r" => [error|_]}} ->
+        {:invalid, [error: error]}
+      %{data: data} ->
+        case func do
+          :insert_all ->
+            {data["inserted"], nil}
+          _ ->
+            new_fields = for field <- returning, id <- data["generated_keys"], do: {field, id}
+            new_fields = Keyword.merge(new_fields, fields)
+            {:ok, new_fields}
+        end
+    end
+  end
+
   defp run(query, repo, {_func, fields}, process) do
     case RethinkDB.run(query, repo.__pool__) do
       %{data: %{"r" => [error|_]}} ->
@@ -140,20 +162,6 @@ defmodule RethinkDB.Ecto do
         {count, records}
       %{data: data} ->
         {1, [[data]]}
-    end
-  end
-
-  defp run(query, repo, {func, fields}) do
-    case RethinkDB.run(query, repo.__pool__) do
-      %{data: %{"r" => [error|_]}} ->
-        {:invalid, [error: error]}
-      %{data: data} ->
-        case func do
-          :insert_all ->
-            {data["inserted"], nil}
-          _ ->
-            {:ok, fields}
-        end
     end
   end
 

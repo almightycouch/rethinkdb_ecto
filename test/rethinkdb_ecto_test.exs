@@ -6,7 +6,7 @@ defmodule RethinkDB.Ecto.Test do
   defmodule User do
     use Ecto.Schema
 
-    @primary_key {:id, :binary_id, autogenerate: true}
+    @primary_key {:id, :binary_id, autogenerate: false}
 
     schema "users" do
       field :name, :string
