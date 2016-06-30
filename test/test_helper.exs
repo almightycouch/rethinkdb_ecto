@@ -46,7 +46,7 @@ end
 {:ok, _pid} = TestRepo.start_link
 {:ok, _pid} = PoolRepo.start_link
 
-_   = Ecto.Storage.down(TestRepo)
-:ok = Ecto.Storage.up(TestRepo)
+_   = RethinkDB.Ecto.storage_down(TestRepo.config)
+:ok = RethinkDB.Ecto.storage_up(TestRepo.config)
 
 :ok = Ecto.Migrator.up(TestRepo, 0, Ecto.Integration.Migration, log: false)
