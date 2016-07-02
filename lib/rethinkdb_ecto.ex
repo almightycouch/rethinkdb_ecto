@@ -42,7 +42,11 @@ defmodule RethinkDB.Ecto do
 
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
 
+  def loaders(:uuid, _type), do: [:string]
+
   def loaders(_primitive, type), do: [type]
+
+  def dumpers(:uuid, type), do: [type, &Ecto.UUID.load/1]
 
   def dumpers(_primitive, type), do: [type]
 
