@@ -141,31 +141,26 @@ defmodule RethinkDB.Ecto do
 
   def supports_ddl_transaction?, do: false
 
-  defp run(query, repo, {func, fields}, returning) when is_list(returning) do
+  defp run(query, repo, {func, fields}, process) do
     case RethinkDB.run(query, repo.__pool__) do
       %{data: %{"r" => [error|_]}} ->
         {:invalid, [error: error]}
-      %{data: data} ->
-        case func do
-          :insert_all ->
-            {data["inserted"], nil}
-          _ ->
-            new_fields = for field <- returning, id <- data["generated_keys"], do: {field, id}
-            new_fields = Keyword.merge(new_fields, fields)
-            {:ok, new_fields}
-        end
-    end
-  end
-
-  defp run(query, repo, {_func, fields}, process) do
-    case RethinkDB.run(query, repo.__pool__) do
-      %{data: %{"r" => [error|_]}} ->
-        raise error
       %{data: data} when is_list(data) ->
         {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, process, fields), &2 + 1})
         {count, records}
       %{data: data} ->
-        {1, [[data]]}
+        case func do
+          :insert_all ->
+            {data["inserted"], nil}
+          :update_all ->
+            {data["replaced"], nil}
+          :delete_all ->
+            {data["deleted"], nil}
+          _func ->
+            new_fields = for field <- process, id <- data["generated_keys"], do: {field, id}
+            new_fields = Keyword.merge(new_fields, fields)
+            {:ok, new_fields}
+        end
     end
   end
 
@@ -175,7 +170,7 @@ defmodule RethinkDB.Ecto do
         data =
           fields
           |> Enum.map(&Atom.to_string/1)
-          |> Enum.map(&Map.fetch!(record, &1))
+          |> Enum.map(&Map.get(record, &1))
         process.(expr, data, nil)
       expr ->
         process.(expr, record, nil)
