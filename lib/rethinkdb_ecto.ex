@@ -1,4 +1,6 @@
 defmodule RethinkDB.Ecto do
+  @moduledoc false
+
   alias RethinkDB.Ecto.NormalizedQuery
   alias RethinkDB.Pseudotypes.Time
   import RethinkDB.Query
@@ -76,11 +78,11 @@ defmodule RethinkDB.Ecto do
 
   def insert(repo, meta, fields, autogenerate_id, _returning, _opts) do
     # filter out nil fields and encode timestamps. Tuple isn't a valid type, so tuple can only be timestamp
-    fields = fields 
-    |> Enum.reduce([], fn {k, v}, acc -> 
+    fields = fields
+    |> Enum.reduce([], fn {k, v}, acc ->
       case v do
         %Ecto.Query.Tagged{value: nil} -> acc
-        {{year, month, day}, {hour, minute, sec, usec}} -> 
+        {{year, month, day}, {hour, minute, sec, usec}} ->
           [{k, encode_timestamp({{year, month, day}, {hour, minute, sec, usec}})}| acc]
         _ -> [{k, v}| acc]
       end
@@ -93,7 +95,7 @@ defmodule RethinkDB.Ecto do
     fields = fields
     |> Enum.reduce([], fn {k, v}, acc ->
       case v do
-        {{year, month, day}, {hour, minute, sec, usec}} -> 
+        {{year, month, day}, {hour, minute, sec, usec}} ->
           [{k, encode_timestamp({{year, month, day}, {hour, minute, sec, usec}})}| acc]
         _ -> [{k, v}| acc]
       end
