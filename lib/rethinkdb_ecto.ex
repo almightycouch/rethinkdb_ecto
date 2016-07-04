@@ -42,11 +42,27 @@ defmodule RethinkDB.Ecto do
 
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
 
-  def loaders(:uuid, _type), do: [:string]
+  def loaders(:uuid, _type), do: [&Ecto.UUID.dump/1]
+
+  def loaders(:datetime, _type) do
+    [fn %RethinkDB.Pseudotypes.Time{epoch_time: timestamp, timezone: _timezone} ->
+      secs = trunc(timestamp)
+      usec = trunc((timestamp - secs) * 1_000_000)
+      {date, {hour, min, sec}} = :calendar.gregorian_seconds_to_datetime(secs + epoch)
+      {:ok, Ecto.DateTime.load {date, {hour, min, sec, usec}}}
+    end]
+  end
 
   def loaders(_primitive, type), do: [type]
 
   def dumpers(:uuid, type), do: [type, &Ecto.UUID.load/1]
+
+  def dumpers(:datetime, type) do
+    [type, fn {{year, month, day}, {hour, min, sec, usec}} ->
+      epoch_time = :calendar.datetime_to_gregorian_seconds({{year, month, day}, {hour, min, sec}}) - epoch
+      {:ok, %RethinkDB.Pseudotypes.Time{epoch_time: epoch_time + usec / 1_000, timezone: "+00:00"}}
+    end]
+  end
 
   def dumpers(_primitive, type), do: [type]
 
@@ -162,6 +178,10 @@ defmodule RethinkDB.Ecto do
             {:ok, new_fields}
         end
     end
+  end
+
+  defp epoch do
+    :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
   end
 
   defp process_record(record, process, ast) do
