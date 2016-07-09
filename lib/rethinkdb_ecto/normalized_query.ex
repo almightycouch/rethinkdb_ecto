@@ -312,5 +312,6 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp evaluate_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _params, []), do: field
   defp evaluate_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, records), do: ReQL.bracket(Enum.at(records, index), field)
   defp evaluate_arg({_op, _, _args} = expr, params, records), do: evaluate(expr, params, records)
+  defp evaluate_arg(expr, params, records) when is_list(expr), do: Enum.map(expr, &evaluate_arg(&1, params, records))
   defp evaluate_arg(expr, _params, _records), do: expr
 end
