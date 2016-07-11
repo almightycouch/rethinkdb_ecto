@@ -108,9 +108,9 @@ defmodule RethinkDB.Ecto do
     name = opts[:database] || "test"
 
     case repo.run(db_create(name)) do
-      %{data: %{"dbs_created" => 1}} ->
+      {:ok, %{data: %{"dbs_created" => 1}}} ->
         :ok
-      %{data: %{"r" => [error|_]}} ->
+      {:error, %{data: %{"r" => [error|_]}}} ->
         {:error, error}
     end
   end
@@ -120,9 +120,9 @@ defmodule RethinkDB.Ecto do
     name = opts[:database] || "test"
 
     case repo.run(db_drop(name)) do
-      %{data: %{"dbs_dropped" => 1}} ->
+      {:ok, %{data: %{"dbs_dropped" => 1}}} ->
         :ok
-      %{data: %{"r" => [error|_]}} ->
+      {:error, %{data: %{"r" => [error|_]}}} ->
         {:error, error}
     end
   end
@@ -163,12 +163,10 @@ defmodule RethinkDB.Ecto do
 
   defp run(query, repo, {func, fields}, process) do
     case RethinkDB.run(query, repo.__pool__) do
-      %{data: %{"r" => [error|_]}} ->
-        {:invalid, [error: error]}
-      %{data: data} when is_list(data) ->
+      {:ok, %{data: data}} when is_list(data) ->
         {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, process, fields), &2 + 1})
         {count, records}
-      %{data: data} ->
+      {:ok, %{data: data}} ->
         case func do
           :insert_all ->
             {data["inserted"], nil}
@@ -181,6 +179,8 @@ defmodule RethinkDB.Ecto do
             new_fields = Keyword.merge(new_fields, fields)
             {:ok, new_fields}
         end
+      {:error, %{data: %{"r" => [error|_]}}} ->
+        {:invalid, [error: error]}
     end
   end
 
