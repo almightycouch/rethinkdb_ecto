@@ -1,9 +1,35 @@
 defmodule RethinkDB.Ecto do
+  @moduledoc """
+  RethinkDB adapter for Ecto.
+
+  This modules implements following behaviours:
+
+  * `Ecto.Adapter`
+  * `Ecto.Adapter.Migration`
+  * `Ecto.Adapter.Storage`
+
+  ## ReQL
+
+  Following helper functions are provided to run RethinkDB queries directly:
+
+  * `run/2` - Runs a query on a connection.
+  * `noreply_wait/1` - Ensures that previous queries with have been processed by the server.
+
+  For example, you can run following query on the repo:
+
+      import RethinkDB.{Query, Lambda}
+
+      table("people")
+      |> filter(lambda &(&1["age"] >= 21))
+      |> Repo.run
+  """
+
   alias RethinkDB.Ecto.NormalizedQuery
 
   import RethinkDB.Query
 
   @behaviour Ecto.Adapter
+  @behaviour Ecto.Adapter.Migration
   @behaviour Ecto.Adapter.Storage
 
   defmacro __before_compile__(env) do
@@ -19,14 +45,11 @@ defmodule RethinkDB.Ecto do
         RethinkDB.Connection.noreply_wait(unquote(pool), timeout)
       end
 
-      def stop do
-        RethinkDB.Connection.stop(unquote(pool))
-      end
-
       defoverridable [__pool__: 0]
     end
   end
 
+  @doc false
   def ensure_all_started(repo, type) do
     {_, opts} = repo.__pool__
     with {:ok, pool} <- DBConnection.ensure_all_started(opts, type),
@@ -35,17 +58,20 @@ defmodule RethinkDB.Ecto do
          do: {:ok, pool ++ List.delete(adapter, :rethinkdb) ++ [:rethinkdb]}
   end
 
+  @doc false
   def child_spec(repo, opts) do
     opts = Keyword.put_new(opts, :name, repo.__pool__)
     DBConnection.child_spec(RethinkDB.Connection, opts)
   end
 
+  @doc false
   def autogenerate(:id), do: nil
 
   def autogenerate(:embed_id), do: Ecto.UUID.generate()
 
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
 
+  @doc false
   def loaders(:uuid, _type), do: [&Ecto.UUID.dump/1]
 
   def loaders(:datetime, _type) do
@@ -59,6 +85,7 @@ defmodule RethinkDB.Ecto do
 
   def loaders(_primitive, type), do: [type]
 
+  @doc false
   def dumpers(:uuid, type), do: [type, &Ecto.UUID.load/1]
 
   def dumpers(:datetime, type) do
@@ -70,13 +97,16 @@ defmodule RethinkDB.Ecto do
 
   def dumpers(_primitive, type), do: [type]
 
+  @doc false
   def prepare(func, query), do: {:nocache, {func, query}}
 
+  @doc false
   def execute(repo, meta, {_cache, {func, query}}, params, preprocess, _opts) do
     apply(NormalizedQuery, func, [query, params])
     |> run(repo, {func, meta.fields}, preprocess)
   end
 
+  @doc false
   def insert(repo, meta, fields, returning, _opts) do
     returning =
       unless meta.schema.__schema__(:autogenerate_id) do
@@ -88,21 +118,31 @@ defmodule RethinkDB.Ecto do
     |> run(repo, {:insert, fields}, returning)
   end
 
+  @doc false
   def insert_all(repo, meta, _header, fields, returning, _opts) do
     NormalizedQuery.insert_all(meta, fields)
     |> run(repo, {:insert_all, fields}, returning)
   end
 
+  @doc false
   def update(repo, meta, fields, filters, returning, _opts) do
     NormalizedQuery.update(meta, fields, filters)
     |> run(repo, {:update, fields}, returning)
   end
 
+  @doc false
   def delete(repo, meta, filters, _opts) do
     NormalizedQuery.delete(meta, filters)
     |> run(repo, {:delete, []}, [])
   end
 
+  @doc """
+  Creates the storage given by options.
+
+  Returns `:ok` if it was created successfully.
+
+  Returns `{:error, :already_up}` if the storage has already been created or `{:error, term}` in case anything else goes wrong.
+  """
   def storage_up(opts) do
     repo = opts[:repo]
     name = opts[:database] || "test"
@@ -115,6 +155,13 @@ defmodule RethinkDB.Ecto do
     end
   end
 
+  @doc """
+  Drops the storage given by options.
+
+  Returns `:ok` if it was dropped successfully.
+
+  Returns `{:error, :already_down}` if the storage has already been dropped or `{:error, term}` in case anything else goes wrong.
+  """
   def storage_down(opts) do
     repo = opts[:repo]
     name = opts[:database] || "test"
@@ -127,7 +174,8 @@ defmodule RethinkDB.Ecto do
     end
   end
 
- def execute_ddl(repo, {:create_if_not_exists, %Ecto.Migration.Table{name: name}, _fields}, _opts) do
+  @doc false
+  def execute_ddl(repo, {:create_if_not_exists, %Ecto.Migration.Table{name: name}, _fields}, _opts) do
     table_create(name) |> repo.run
     :ok
   end
@@ -159,6 +207,7 @@ defmodule RethinkDB.Ecto do
     :ok
   end
 
+  @doc false
   def supports_ddl_transaction?, do: false
 
   defp run(query, repo, {func, fields}, process) do

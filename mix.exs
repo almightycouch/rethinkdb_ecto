@@ -1,23 +1,48 @@
 defmodule RethinkDB.Ecto.Mixfile do
   use Mix.Project
 
+  @version "0.5.0"
+
   def project do
     [app: :rethinkdb_ecto,
-     version: "0.0.1",
-     elixir: "~> 1.2",
+     name: "RethinkDB.Ecto",
+     version: @version,
+     elixir: "~> 1.3",
+     package: package,
+     description: description,
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
+     docs: docs,
      deps: deps]
   end
 
-  # Type "mix help compile.app" for more information
   def application do
     [applications: [:logger, :ecto]]
   end
 
-  # Type "mix help deps" for more examples and options
+  defp package do
+    [files: ["lib", "mix.exs", "README.md", "LICENSE"],
+      maintainers: ["Mario Flach"],
+      licenses: ["MIT"],
+      links: %{github: "https://github.com/almightycouch/twittex"}]
+  end
+
+  defp description do
+    "RethinkDB adapter for Ecto"
+  end
+
+  defp docs do
+    [extras: ["README.md"],
+      main: "readme",
+      source_ref: "v#{@version}",
+      source_url: "https://github.com/almightycouch/rethinkdb_ecto"]
+  end
+
   defp deps do
-    [{:ecto, "~> 2.0.0"},
-     {:rethinkdb, github: "almightycouch/rethinkdb-elixir"}]
+    [{:ecto, "~> 2.0"},
+     {:rethinkdb, github: "almightycouch/rethinkdb-elixir"},
+     {:ex_doc, "~> 0.12", only: :dev},
+     {:earmark, ">= 0.0.0", only: :dev}]
+
   end
 end

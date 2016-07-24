@@ -1,4 +1,6 @@
 defmodule RethinkDB.Ecto.NormalizedQuery do
+  @moduledoc false
+
   alias Ecto.Query
   alias Ecto.Query.{QueryExpr, SelectExpr, JoinExpr}
   alias Ecto.Association
