@@ -24,7 +24,7 @@ defmodule RethinkDB.Ecto.Mixfile do
     [files: ["lib", "mix.exs", "README.md", "LICENSE"],
       maintainers: ["Mario Flach"],
       licenses: ["MIT"],
-      links: %{github: "https://github.com/almightycouch/twittex"}]
+      links: %{"GitHub" => "https://github.com/almightycouch/rethinkdb_ecto"}]
   end
 
   defp description do
