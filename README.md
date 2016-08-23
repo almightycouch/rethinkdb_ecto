@@ -26,7 +26,7 @@ def application do
 end
 ```
 
-Finally, in the repository configuration, you will need to specific the `:adapter`:
+Finally, in the repository configuration, you will need to specify the `:adapter`:
 
 ```elixir
 config :my_app, Repo,
