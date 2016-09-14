@@ -29,4 +29,4 @@ config :my_app, Repo,
 
 ## Status
 
-This adapter works with Ecto 1.x. Use the latest master branch from GitHub for (partial) Ecto 2.x support.
+This adapter works with Ecto 1.x. Checkout the `ecto_2` branch from GitHub for (partial) Ecto 2.x support.
