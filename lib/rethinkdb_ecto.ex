@@ -50,9 +50,8 @@ defmodule RethinkDB.Ecto do
   end
 
   @doc false
-  def ensure_all_started(repo, type) do
-    {_, opts} = repo.__pool__
-    with {:ok, pool} <- DBConnection.ensure_all_started(opts, type),
+  def ensure_all_started(_repo, type) do
+    with {:ok, pool} <- DBConnection.ensure_all_started([], type),
          {:ok, adapter} <- Application.ensure_all_started(:rethinkdb, type),
          # We always return the adapter to force it to be restarted if necessary
          do: {:ok, pool ++ List.delete(adapter, :rethinkdb) ++ [:rethinkdb]}
