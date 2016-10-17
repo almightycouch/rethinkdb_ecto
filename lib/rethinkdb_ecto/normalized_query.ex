@@ -50,8 +50,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     |> group_by(query, params)
     |> having(query, params)
     |> order_by(query, params)
-    |> offset(query)
-    |> limit(query)
+    |> offset(query, params)
+    |> limit(query, params)
     |> select(query, params)
     |> distinct(query, params)
   end
@@ -132,15 +132,19 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   # limit()
   #
 
-  defp limit(reql, %Query{limit: nil}), do: reql
-  defp limit(reql, %Query{limit: limit}), do: ReQL.limit(reql, limit.expr)
+  defp limit(reql, %Query{limit: nil}, _), do: reql
+  defp limit(reql, %Query{limit: limit}, params) do
+    ReQL.limit(reql, evaluate_arg(limit.expr, params))
+  end
 
   #
   # offset()
   #
 
-  defp offset(reql, %Query{offset: nil}), do: reql
-  defp offset(reql, %Query{offset: offset}), do: ReQL.skip(reql, offset.expr)
+  defp offset(reql, %Query{offset: nil}, _), do: reql
+  defp offset(reql, %Query{offset: offset}, params) do
+    ReQL.skip(reql, evaluate_arg(offset.expr, params))
+  end
 
   #
   # select()

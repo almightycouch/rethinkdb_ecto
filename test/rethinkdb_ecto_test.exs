@@ -69,6 +69,52 @@ defmodule RethinkDB.EctoTest do
     assert names == ["Sophie", "Mario", "Lara", "Peter"]
   end
 
+  test "fetches all with limit" do
+    users = Repo.all(from u in User, order_by: [desc: u.age], limit: 2)
+    names = Enum.map(users, &Map.get(&1, :name))
+
+    assert names == ["Sophie", "Mario"]
+  end
+
+  test "fetches all with offset" do
+    users = Repo.all(from u in User, order_by: [desc: u.age], offset: 1)
+    names = Enum.map(users, &Map.get(&1, :name))
+
+    assert names == ["Mario", "Lara", "Peter"]
+  end
+
+  test "fetches all with limit and offset" do
+    users = Repo.all(from u in User, order_by: [desc: u.age], limit: 2, offset: 1)
+    names = Enum.map(users, &Map.get(&1, :name))
+
+    assert names == ["Mario", "Lara"]
+  end
+
+  test "fetches all with pinned limit" do
+    limit = 2
+    users = Repo.all(from u in User, order_by: [desc: u.age], limit: ^limit)
+    names = Enum.map(users, &Map.get(&1, :name))
+
+    assert names == ["Sophie", "Mario"]
+  end
+
+  test "fetches all with pinned offset" do
+    offset = 1
+    users = Repo.all(from u in User, order_by: [desc: u.age], offset: ^offset)
+    names = Enum.map(users, &Map.get(&1, :name))
+
+    assert names == ["Mario", "Lara", "Peter"]
+  end
+
+  test "fetches all with pinned limit and offset" do
+    limit = 2
+    offset = 1
+    users = Repo.all(from u in User, order_by: [desc: u.age], limit: ^limit, offset: ^offset)
+    names = Enum.map(users, &Map.get(&1, :name))
+
+    assert names == ["Mario", "Lara"]
+  end
+
   test "filters singles only" do
     users = Repo.all(from u in User, where: not u.in_relationship)
     names = Enum.map(users, &Map.get(&1, :name))
