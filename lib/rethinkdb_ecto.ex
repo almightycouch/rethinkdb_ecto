@@ -1,220 +1,210 @@
 defmodule RethinkDB.Ecto do
-  @moduledoc """
-  RethinkDB adapter for Ecto.
-
-  This modules implements following behaviours:
-
-  * `Ecto.Adapter`
-  * `Ecto.Adapter.Migration`
-  * `Ecto.Adapter.Storage`
-
-  ## ReQL
-
-  Following helper functions are provided to run RethinkDB queries directly:
-
-  * `run/2` - Runs a query on a connection.
-  * `noreply_wait/1` - Ensures that previous queries with have been processed by the server.
-
-  For example, you can run following query on the repo:
-
-      import RethinkDB.{Query, Lambda}
-
-      table("people")
-      |> filter(lambda &(&1["age"] >= 21))
-      |> Repo.run
-  """
-
-  alias RethinkDB.Ecto.NormalizedQuery
-
-  import RethinkDB.Query
 
   @behaviour Ecto.Adapter
-  @behaviour Ecto.Adapter.Migration
   @behaviour Ecto.Adapter.Storage
+  @behaviour Ecto.Adapter.Migration
+
+  alias RethinkDB.Ecto.NormalizedQuery
+  alias RethinkDB.Query, as: ReQL
+
+  require Logger
+
+  #
+  # Adapter callbacks
+  #
 
   defmacro __before_compile__(env) do
-    pool = Module.concat(env.module, Pool)
+    module = env.module
+    config = Module.get_attribute(env.module, :config)
+    norm_config = normalize_config(config)
+
     quote do
-      def __pool__, do: unquote(pool)
-
-      def run(query, opts \\ []) do
-        RethinkDB.Connection.run(query, unquote(pool), opts)
+      defmodule Connection do
+        use RethinkDB.Connection
       end
 
-      def noreply_wait(timeout \\ 15_000) do
-        RethinkDB.Connection.noreply_wait(unquote(pool), timeout)
-      end
+      defdelegate run(query), to: Connection
+      defdelegate run(query, options), to: Connection
 
-      defoverridable [__pool__: 0]
+      def __connection__, do: unquote(module).Connection
+      def __config__, do: unquote(Macro.escape(norm_config))
     end
   end
 
-  @doc false
   def ensure_all_started(_repo, type) do
-    with {:ok, pool} <- DBConnection.ensure_all_started([], type),
-         {:ok, adapter} <- Application.ensure_all_started(:rethinkdb, type),
-         # We always return the adapter to force it to be restarted if necessary
-         do: {:ok, pool ++ List.delete(adapter, :rethinkdb) ++ [:rethinkdb]}
+    Application.ensure_all_started(:rethinkdb_ecto, type)
   end
 
-  @doc false
-  def child_spec(repo, opts) do
-    opts = Keyword.put_new(opts, :name, repo.__pool__)
-    DBConnection.child_spec(RethinkDB.Connection, opts)
+
+  def child_spec(repo, _options) do
+    import Supervisor.Spec
+    worker(repo.__connection__, [repo.__config__])
   end
 
-  @doc false
   def autogenerate(:id), do: nil
 
   def autogenerate(:embed_id), do: Ecto.UUID.generate()
 
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
 
-  @doc false
   def loaders(:uuid, _type), do: [&Ecto.UUID.dump/1]
 
   def loaders(:datetime, _type) do
     [fn %RethinkDB.Pseudotypes.Time{epoch_time: timestamp, timezone: _timezone} ->
       secs = trunc(timestamp)
       usec = trunc((timestamp - secs) * 1_000_000)
-      {date, {hour, min, sec}} = :calendar.gregorian_seconds_to_datetime(secs + epoch)
-      {:ok, Ecto.DateTime.load {date, {hour, min, sec, usec}}}
+      base = :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
+      {date, {hour, min, sec}} = :calendar.gregorian_seconds_to_datetime(secs + base)
+      {:ok, Ecto.DateTime.load({date, {hour, min, sec, usec}})}
     end]
   end
 
   def loaders(_primitive, type), do: [type]
 
-  @doc false
   def dumpers(:uuid, type), do: [type, &Ecto.UUID.load/1]
 
   def dumpers(:datetime, type) do
     [type, fn {{year, month, day}, {hour, min, sec, usec}} ->
-      epoch_time = :calendar.datetime_to_gregorian_seconds({{year, month, day}, {hour, min, sec}}) - epoch
+      base = :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
+      epoch_time = :calendar.datetime_to_gregorian_seconds({{year, month, day}, {hour, min, sec}}) - base
       {:ok, %RethinkDB.Pseudotypes.Time{epoch_time: epoch_time + usec / 1_000, timezone: "+00:00"}}
     end]
   end
 
   def dumpers(_primitive, type), do: [type]
 
-  @doc false
   def prepare(func, query), do: {:nocache, {func, query}}
 
-  @doc false
-  def execute(repo, meta, {_cache, {func, query}}, params, preprocess, _opts) do
-    apply(NormalizedQuery, func, [query, params])
-    |> run(repo, {func, meta.fields}, preprocess)
+  def execute(repo, meta, {_cache, {func, query}}, params, preprocess, _options) do
+    NormalizedQuery
+    |> apply(func, [query, params])
+    |> execute_query(repo, {func, meta.fields}, preprocess)
   end
 
-  @doc false
-  def insert(repo, meta, fields, returning, _opts) do
+  def insert(repo, meta, fields, returning, _options) do
     returning =
       unless meta.schema.__schema__(:autogenerate_id) do
         returning ++ meta.schema.__schema__(:primary_key)
       else
         returning
       end
+
     NormalizedQuery.insert(meta, fields)
-    |> run(repo, {:insert, fields}, returning)
+    |> execute_query(repo, {:insert, fields}, returning)
   end
 
-  @doc false
-  def insert_all(repo, meta, _header, fields, returning, _opts) do
+  def insert_all(repo, meta, _header, fields, returning, _options) do
     NormalizedQuery.insert_all(meta, fields)
-    |> run(repo, {:insert_all, fields}, returning)
+    |> execute_query(repo, {:insert_all, fields}, returning)
   end
 
-  @doc false
-  def update(repo, meta, fields, filters, returning, _opts) do
+  def update(repo, meta, fields, filters, returning, _options) do
     NormalizedQuery.update(meta, fields, filters)
-    |> run(repo, {:update, fields}, returning)
+    |> execute_query(repo, {:update, fields}, returning)
   end
 
-  @doc false
-  def delete(repo, meta, filters, _opts) do
+  def delete(repo, meta, filters, _options) do
     NormalizedQuery.delete(meta, filters)
-    |> run(repo, {:delete, []}, [])
+    |> execute_query(repo, {:delete, []}, [])
   end
 
-  @doc """
-  Creates the storage given by options.
 
-  Returns `:ok` if it was created successfully.
+  #
+  # Storage callbacks
+  #
 
-  Returns `{:error, :already_up}` if the storage has already been created or `{:error, term}` in case anything else goes wrong.
-  """
-  def storage_up(opts) do
-    repo = opts[:repo]
-    name = opts[:database] || "test"
+  def storage_down(options) do
+    repo = Keyword.fetch!(options, :repo)
+    conf = repo.__config__
+    name = Keyword.get(options, :database, conf[:db])
 
-    case repo.run(db_create(name)) do
-      {:ok, %{data: %{"dbs_created" => 1}}} ->
+    repo.__connection__.start_link(conf)
+    case repo.run(ReQL.db_drop(name)) do
+      {:ok, %RethinkDB.Record{data: %{"dbs_dropped" => 1}}} ->
         :ok
-      {:error, %{data: %{"r" => [error|_]}}} ->
-        {:error, error}
+      {:error, %RethinkDB.Response{data: %{"r" => [error|_]}}} ->
+        raise error
     end
   end
 
-  @doc """
-  Drops the storage given by options.
+  def storage_up(options) do
+    repo = Keyword.fetch!(options, :repo)
+    conf = repo.__config__
+    name = Keyword.get(options, :database, conf[:db])
 
-  Returns `:ok` if it was dropped successfully.
-
-  Returns `{:error, :already_down}` if the storage has already been dropped or `{:error, term}` in case anything else goes wrong.
-  """
-  def storage_down(opts) do
-    repo = opts[:repo]
-    name = opts[:database] || "test"
-
-    case repo.run(db_drop(name)) do
-      {:ok, %{data: %{"dbs_dropped" => 1}}} ->
+    repo.__connection__.start_link(conf)
+    case repo.run(ReQL.db_create(name)) do
+      {:ok, %RethinkDB.Record{data: %{"dbs_created" => 1}}} ->
         :ok
-      {:error, %{data: %{"r" => [error|_]}}} ->
-        {:error, error}
+      {:error, %RethinkDB.Response{data: %{"r" => [error|_]}}} ->
+        raise error
     end
   end
 
-  @doc false
-  def execute_ddl(repo, {:create_if_not_exists, %Ecto.Migration.Table{name: name}, _fields}, _opts) do
-    table_create(name) |> repo.run
+  #
+  # Migration callbacks
+  #
+
+  def execute_ddl(repo, {:create_if_not_exists, %Ecto.Migration.Table{name: name}, _fields}, _options) do
+    ReQL.table_create(name)
+    |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:create, e = %Ecto.Migration.Table{name: name}, _fields}, _opts) do
+  def execute_ddl(repo, {:create, e = %Ecto.Migration.Table{name: name}, _fields}, _options) do
     options = e.options || %{}
-    table_create(name, options)
-    |> repo.run
+    ReQL.table_create(name, options)
+    |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: [column], table: table}}, _opts) do
-    table(table)
-    |> index_create(column)
-    |> repo.run
+  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: cols, table: table}}, _options) do
+    cols
+    |> Enum.reduce(ReQL.table(table), fn col, reql -> ReQL.index_create(reql, col) end)
+    |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:drop, %Ecto.Migration.Table{name: name}}, _opts) do
-    table_drop(name)
-    |> repo.run
+  def execute_ddl(repo, {:drop, %Ecto.Migration.Table{name: name}}, _options) do
+    ReQL.table_drop(name)
+    |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:drop, %Ecto.Migration.Index{columns: [column], table: table}}, _opts) do
-    table(table)
-    |> index_drop(column)
-    |> repo.run
+  def execute_ddl(repo, {:drop, %Ecto.Migration.Index{columns: cols, table: table}}, _options) do
+    cols
+    |> Enum.reduce(ReQL.table(table), fn col, reql -> ReQL.index_drop(reql, col) end)
+    |> repo.run()
     :ok
   end
 
-  @doc false
   def supports_ddl_transaction?, do: false
 
-  defp run(query, repo, {func, fields}, process) do
-    case RethinkDB.run(query, repo.__pool__) do
-      {:ok, %{data: data}} when is_list(data) ->
+  #
+  # Transaction callbacks
+  #
+
+  def in_transaction?(_repo), do: false
+
+  def rollback(_repo, _value), do:
+    raise BadFunctionError, message: "#{inspect __MODULE__} does not support transactions."
+
+  #
+  # Helpers
+  #
+
+  defp normalize_config(options) do
+    [host: String.to_charlist(Keyword.get(options, :hostname, "localhost")),
+     port: Keyword.get(options, :port, 28015),
+     db: Keyword.get(options, :database, "test")]
+  end
+
+  defp execute_query(query, repo, {func, fields}, process) do
+    case RethinkDB.run(query, repo.__connection__) do
+      {:ok, %RethinkDB.Collection{data: data}} when is_list(data) ->
         {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, process, fields), &2 + 1})
         {count, records}
-      {:ok, %{data: data}} ->
+      {:ok, %RethinkDB.Record{data: data}} ->
         case func do
           :insert_all ->
             {data["inserted"], nil}
@@ -227,18 +217,14 @@ defmodule RethinkDB.Ecto do
             new_fields = Keyword.merge(new_fields, fields)
             {:ok, new_fields}
         end
-      {:error, %{data: %{"r" => [error|_]}}} ->
-        {:invalid, [error: error]}
+      {:error, %RethinkDB.Response{data: %{"r" => [error|_]}}} ->
+        raise error
     end
-  end
+ end
 
-  defp epoch do
-    :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
-  end
-
-  defp process_record(record, process, ast) do
+ defp process_record(record, process, ast) do
     Enum.map(ast, fn
-      {:&, _, [_, fields, _]} = expr ->
+      {:&, _, [_, fields, _]} = expr when is_list(fields) ->
         data =
           fields
           |> Enum.map(&Atom.to_string/1)

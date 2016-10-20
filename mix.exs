@@ -1,7 +1,7 @@
 defmodule RethinkDB.Ecto.Mixfile do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.6.0"
 
   def project do
     [app: :rethinkdb_ecto,
@@ -17,7 +17,7 @@ defmodule RethinkDB.Ecto.Mixfile do
   end
 
   def application do
-    [applications: [:logger, :ecto]]
+    [applications: [:logger, :ecto, :rethinkdb]]
   end
 
   defp package do
@@ -40,7 +40,7 @@ defmodule RethinkDB.Ecto.Mixfile do
 
   defp deps do
     [{:ecto, "~> 2.0"},
-     {:rethinkdb, github: "almightycouch/rethinkdb-elixir"},
+     {:rethinkdb, github: "hamiltop/rethinkdb-elixir"},
      {:ex_doc, "~> 0.12", only: :dev},
      {:earmark, ">= 0.0.0", only: :dev}]
 

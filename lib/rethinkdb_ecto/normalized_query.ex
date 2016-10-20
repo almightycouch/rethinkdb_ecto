@@ -3,9 +3,6 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   alias Ecto.Query
   alias Ecto.Query.{QueryExpr, SelectExpr, JoinExpr}
-  alias Ecto.Association
-
-  import RethinkDB.Lambda
 
   alias RethinkDB.Query, as: ReQL
 
@@ -55,8 +52,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     |> group_by(query, params)
     |> having(query, params)
     |> order_by(query, params)
-    |> offset(query)
-    |> limit(query)
+    |> offset(query, params)
+    |> limit(query, params)
     |> select(query, params)
     |> distinct(query, params)
   end
@@ -137,15 +134,19 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   # limit()
   #
 
-  defp limit(reql, %Query{limit: nil}), do: reql
-  defp limit(reql, %Query{limit: limit}), do: ReQL.limit(reql, limit.expr)
+  defp limit(reql, %Query{limit: nil}, _), do: reql
+  defp limit(reql, %Query{limit: limit}, params) do
+    ReQL.limit(reql, evaluate_arg(limit.expr, params))
+  end
 
   #
   # offset()
   #
 
-  defp offset(reql, %Query{offset: nil}), do: reql
-  defp offset(reql, %Query{offset: offset}), do: ReQL.skip(reql, offset.expr)
+  defp offset(reql, %Query{offset: nil}, _), do: reql
+  defp offset(reql, %Query{offset: offset}, params) do
+    ReQL.skip(reql, evaluate_arg(offset.expr, params))
+  end
 
   #
   # select()
@@ -254,11 +255,9 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   defp like([field, match], caseless \\ false) do
     regex = Regex.escape(match)
-    if String.first(regex) != "%", do: regex = "^" <> regex
-    if String.last(regex) != "%", do: regex = regex <> "%"
-    regex =
-      String.strip(regex, ?%)
-      |> Regex.compile!(if caseless, do: "i", else: "")
+    regex = if String.first(regex) != "%", do: "^" <> regex, else: regex
+    regex = if String.last(regex) != "%", do: regex <> "%", else: regex
+    regex = Regex.compile!(String.strip(regex, ?%), (if caseless, do: "i", else: ""))
     apply(ReQL, :match, [field, regex])
   end
 
@@ -314,6 +313,5 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp evaluate_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _params, []), do: field
   defp evaluate_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, records), do: ReQL.bracket(Enum.at(records, index), field)
   defp evaluate_arg({_op, _, _args} = expr, params, records), do: evaluate(expr, params, records)
-  defp evaluate_arg(expr, params, records) when is_list(expr), do: Enum.map(expr, &evaluate_arg(&1, params, records))
   defp evaluate_arg(expr, _params, _records), do: expr
 end
