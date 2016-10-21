@@ -228,17 +228,19 @@ defmodule RethinkDB.Ecto do
   defp execute_query(query, repo, {func, fields}, process) do
     case RethinkDB.run(query, repo.__connection__) do
       {:ok, %{data: data}} when is_list(data) ->
-        {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, process, fields), &2 + 1})
+        {records, count} = Enum.map_reduce(data, 0, &{process_result(&1, process, fields), &2 + 1})
         {count, records}
       {:ok, %{data: data}} ->
         case func do
+          :all when not is_list(data) ->
+            {1, [process_result(data, process, fields)]}
           :insert_all ->
             {data["inserted"], nil}
           :update_all ->
             {data["replaced"], nil}
           :delete_all ->
             {data["deleted"], nil}
-          _else ->
+          _else when is_list(process) ->
             new_fields = for field <- process, id <- data["generated_keys"], do: {field, id}
             new_fields = Keyword.merge(new_fields, fields)
             {:ok, new_fields}
@@ -248,16 +250,23 @@ defmodule RethinkDB.Ecto do
     end
  end
 
- defp process_record(record, process, ast) do
-    Enum.map(ast, fn
-      {:&, _, [_, fields, _]} = expr when is_list(fields) ->
-        data =
-          fields
-          |> Enum.map(&Atom.to_string/1)
-          |> Enum.map(&Map.get(record, &1))
-        process.(expr, data, nil)
-      expr ->
-        process.(expr, record, nil)
+ defp process_result(record, process, ast) when is_map(record) do
+    Enum.map(ast, fn {:&, _, [_, fields, _]} = expr when is_list(fields) ->
+      data =
+        fields
+        |> Enum.map(&Atom.to_string/1)
+        |> Enum.map(&Map.get(record, &1))
+      process.(expr, data, nil)
     end)
   end
+
+ defp process_result(record, process, ast) when is_list(record) and is_list(ast) and length(record) == length(ast) do
+   ast
+   |> Enum.zip(record)
+   |> Enum.map(fn {ast, field} -> process.(ast, field, nil) end)
+ end
+
+ defp process_result(record, process, ast) do
+   Enum.map(ast, &process.(&1, record, nil))
+ end
 end

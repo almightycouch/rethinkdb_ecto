@@ -45,39 +45,26 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     |> ReQL.delete()
   end
 
-  defp normalize_query(query, params) do
-    from(query)
-    |> join(query, params)
-    |> where(query, params)
-    |> group_by(query, params)
-    |> having(query, params)
-    |> order_by(query, params)
-    |> offset(query, params)
-    |> limit(query, params)
-    |> select(query, params)
-    |> distinct(query, params)
-  end
-
   #
-  # from()
+  # FROM
   #
 
   defp from(%{source: {_prefix, table}}), do: ReQL.table(table)
   defp from(%Query{from: {table, _model}}), do: ReQL.table(table)
 
   #
-  # join()
+  # JOIN
   #
 
   defp join(reql, %Query{joins: joins}, params) do
-    Enum.reduce(joins, reql, fn %JoinExpr{on: on, source: {table, model}}, reql ->
+    Enum.reduce(joins, reql, fn %JoinExpr{on: on, source: {table, _schema}}, reql ->
       ReQL.inner_join(reql, ReQL.table(table), &evaluate(on.expr, params, [&1, &2]))
       |> ReQL.map(&[ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")])
     end)
   end
 
   #
-  # where()
+  # WHERE
   #
 
   defp where(reql, %Query{wheres: wheres, sources: sources}, params) do
@@ -97,7 +84,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   #
-  # group_by()
+  # GROUP BY
   #
 
   defp group_by(reql, %Query{group_bys: groups}, params) do
@@ -109,17 +96,17 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   #
-  # having()
+  # HAVING
   #
 
   defp having(reql, %Query{havings: havings}, params) do
     Enum.reduce(havings, reql, fn %QueryExpr{expr: expr}, reql ->
-      ReQL.filter(reql, &evaluate(expr, params, [&1]))
+      ReQL.filter(reql, &evaluate(expr, params, [ReQL.bracket(&1, "reduction")]))
     end)
   end
 
   #
-  # order_by()
+  # ORDER BY
   #
 
   defp order_by(reql, %Query{order_bys: order_bys}, params) do
@@ -131,7 +118,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   #
-  # limit()
+  # LIMIT
   #
 
   defp limit(reql, %Query{limit: nil}, _), do: reql
@@ -140,7 +127,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   #
-  # offset()
+  # OFFSET
   #
 
   defp offset(reql, %Query{offset: nil}, _), do: reql
@@ -149,10 +136,10 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   #
-  # select()
+  # SELECT
   #
 
-  defp select(reql, %Query{select: nil}, params), do: reql
+  defp select(reql, %Query{select: nil}, _params), do: reql
 
   # support for list
   defp select(reql, %Query{select: %SelectExpr{expr: args}, group_bys: groups}, params) when is_list(args) do
@@ -167,7 +154,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   # support for map
   defp select(reql, %Query{select: %SelectExpr{expr: {:%{}, _, args}}, group_bys: groups}, params) do
     ReQL.map(reql, fn record ->
-      Enum.into(args, [], fn {key, expr} ->
+      Enum.into(args, [], fn {_key, expr} ->
         selectize(reql, record, groups, evaluate_arg(expr, params), params)
       end)
     end)
@@ -197,17 +184,39 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   # support for aggregator (group_by)
-  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, args} = expr}, group_bys: groups}, params) do
+  defp select(reql, %Query{select: %SelectExpr{expr: {_, _, _} = expr}, group_bys: groups}, params) do
     ReQL.map(reql, &selectize(reql, &1, groups, evaluate_arg(expr, params), params))
   end
 
   #
-  # distinct()
+  # DISTINCT
   #
 
-  defp distinct(reql, %Query{distinct: nil}, params), do: reql
-  defp distinct(reql, %Query{distinct: %QueryExpr{expr: true}}, params), do: ReQL.distinct(reql)
+  defp distinct(reql, %Query{distinct: %QueryExpr{expr: false}}, _params), do: reql
+  defp distinct(reql, %Query{distinct: nil}, _params), do: reql
 
+  defp distinct(reql, %Query{distinct: %QueryExpr{expr: true}}, _params), do: ReQL.distinct(reql)
+  defp distinct(_reql, %Query{distinct: %QueryExpr{expr: expr}}, params) do
+    fields = evaluate_arg(expr, params)
+    raise "Can not perform a dictinct on #{inspect fields}, use group_by instead."
+  end
+
+  #
+  # Helpers
+  #
+
+  defp normalize_query(query, params) do
+    from(query)
+    |> join(query, params)
+    |> where(query, params)
+    |> group_by(query, params)
+    |> having(query, params)
+    |> order_by(query, params)
+    |> offset(query, params)
+    |> limit(query, params)
+    |> select(query, params)
+    |> distinct(query, params)
+  end
 
   defp selectize(reql, groups, args, params) do
     fields = Enum.map(args, &evaluate_arg(&1, params))
@@ -218,7 +227,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   defp selectize(reql, record, [], expr, params) do
     case expr do
-      {:&, args} ->
+      {:&, _args} ->
         record
       {op, args} ->
         aggregate(reql, op, args, params)
@@ -229,7 +238,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end
   end
 
-  defp selectize(reql, record, groups, expr, params) do
+  defp selectize(_reql, record, groups, expr, params) do
     groups = Enum.flat_map(groups, fn %QueryExpr{expr: expr} -> Enum.map(expr, &evaluate_arg(&1, params)) end)
     cond do
       expr in groups ->
@@ -255,9 +264,9 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   defp like([field, match], caseless \\ false) do
     regex = Regex.escape(match)
-    regex = if String.first(regex) != "%", do: "^" <> regex, else: regex
-    regex = if String.last(regex) != "%", do: regex <> "%", else: regex
-    regex = Regex.compile!(String.strip(regex, ?%), (if caseless, do: "i", else: ""))
+    regex = if String.first(regex) != "%", do: "^" <> regex, else: String.replace_prefix(regex, "%", "")
+    regex = if String.last(regex) != "%", do: regex <> "$", else: String.replace_suffix(regex, "%", "")
+    regex = if caseless, do: "(?i)" <> regex, else: regex
     apply(ReQL, :match, [field, regex])
   end
 
@@ -311,7 +320,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp evaluate_arg(args, params, records) when is_list(args), do: Enum.map(args, &evaluate_arg(&1, params, records))
   defp evaluate_arg({:^, _, [index]}, params, _records), do: Enum.at(params, index)
   defp evaluate_arg({:^, _, [index, count]}, params, _records), do: Enum.slice(params, index, count)
-  defp evaluate_arg({:^, _, args}, params, _records), do: raise "Unsupported pin arguments: #{inspect args}"
+  defp evaluate_arg({:^, _, args}, _params, _records), do: raise "Unsupported pin arguments: #{inspect args}"
   defp evaluate_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _params, []), do: field
   defp evaluate_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, records), do: ReQL.bracket(Enum.at(records, index), field)
   defp evaluate_arg({_op, _, _args} = expr, params, records), do: evaluate(expr, params, records)
