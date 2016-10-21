@@ -2,6 +2,7 @@ defmodule RethinkDB.Ecto.Test do
   use ExUnit.Case
 
   alias Ecto.Integration.TestRepo
+  alias RethinkDB.Query, as: ReQL
 
   defmodule User do
     use Ecto.Schema
@@ -17,6 +18,16 @@ defmodule RethinkDB.Ecto.Test do
   end
 
   setup_all do
+    User.__schema__(:source)
+    |> ReQL.table_create()
+    |> TestRepo.run()
+    :ok
+  end
+
+  setup do
+    User.__schema__(:source)
+    |> ReQL.table()
+    |> ReQL.delete()
     :ok
   end
 
@@ -36,10 +47,10 @@ defmodule RethinkDB.Ecto.Test do
   end
 
   test "insert, update and delete users" do
-    TestRepo.insert_all User, [%{name: "Mario", age: 26, in_relationship: true},
-                               %{name: "Roman", age: 24, in_relationship: true},
-                               %{name: "Felix", age: 25, in_relationship: true}]
-    TestRepo.update_all User, set: [in_relationship: false]
-    TestRepo.delete_all User
+    assert {3, _} = TestRepo.insert_all User, [%{name: "Mario", age: 26, in_relationship: true},
+                                               %{name: "Felix", age: 25, in_relationship: true},
+                                               %{name: "Roman", age: 24, in_relationship: true}]
+    assert {3, _} = TestRepo.update_all User, set: [in_relationship: false]
+    assert {3, _} = TestRepo.delete_all User
   end
 end

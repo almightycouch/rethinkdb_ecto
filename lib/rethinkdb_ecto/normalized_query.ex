@@ -307,6 +307,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   defp evaluate_arg(expr, params, records \\ [])
+  defp evaluate_arg(%Ecto.Query.Tagged{value: arg}, params, records), do: evaluate_arg(arg, params, records)
+  defp evaluate_arg(args, params, records) when is_list(args), do: Enum.map(args, &evaluate_arg(&1, params, records))
   defp evaluate_arg({:^, _, [index]}, params, _records), do: Enum.at(params, index)
   defp evaluate_arg({:^, _, [index, count]}, params, _records), do: Enum.slice(params, index, count)
   defp evaluate_arg({:^, _, args}, params, _records), do: raise "Unsupported pin arguments: #{inspect args}"

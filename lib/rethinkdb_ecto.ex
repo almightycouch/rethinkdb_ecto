@@ -7,6 +7,8 @@ defmodule RethinkDB.Ecto do
   alias RethinkDB.Ecto.NormalizedQuery
   alias RethinkDB.Query, as: ReQL
 
+  import RethinkDB.Lambda
+
   require Logger
 
   #
@@ -83,7 +85,7 @@ defmodule RethinkDB.Ecto do
 
   def insert(repo, meta, fields, returning, _options) do
     returning =
-      unless meta.schema.__schema__(:autogenerate_id) do
+      unless meta.schema.__schema__(:autogenerate_id) && meta.schema.__schema__(:primary_key) in returning do
         returning ++ meta.schema.__schema__(:primary_key)
       else
         returning
@@ -145,35 +147,59 @@ defmodule RethinkDB.Ecto do
   # Migration callbacks
   #
 
-  def execute_ddl(repo, {:create_if_not_exists, %Ecto.Migration.Table{name: name}, _fields}, _options) do
-    ReQL.table_create(name)
+  def execute_ddl(repo, {:create_if_not_exists, %Ecto.Migration.Table{name: table, primary_key: pk}, _fields}, options) do
+    if options[:log] && !pk, do: Logger.warn "#{inspect __MODULE__} cannot omit primary key for table #{inspect table} ."
+    table
+    |> ReQL.table_create()
     |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:create, e = %Ecto.Migration.Table{name: name}, _fields}, _options) do
-    options = e.options || %{}
-    ReQL.table_create(name, options)
+  def execute_ddl(repo, {:create, %Ecto.Migration.Table{name: table, primary_key: pk}, _fields}, options) do
+    if options[:log] && !pk, do: Logger.warn "#{inspect __MODULE__} cannot omit primary key for table #{inspect table}."
+    table
+    |> ReQL.table_create()
     |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: cols, table: table}}, _options) do
-    cols
-    |> Enum.reduce(ReQL.table(table), fn col, reql -> ReQL.index_create(reql, col) end)
+  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: [col], table: table, name: name, unique: unique}}, options) do
+    if options[:log] && unique, do: Logger.warn "#{inspect __MODULE__} cannot create unique index #{inspect name} for table #{inspect table}."
+    table
+    |> ReQL.table()
+    |> ReQL.index_create(col)
     |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:drop, %Ecto.Migration.Table{name: name}}, _options) do
-    ReQL.table_drop(name)
+  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: cols, table: table, name: name, unique: unique}}, options) do
+    if options[:log] && unique, do: Logger.warn "#{inspect __MODULE__} cannot create unique index #{inspect name} for table #{inspect table}."
+    table
+    |> ReQL.table()
+    |> ReQL.index_create(name, lambda fn(row) -> Enum.map(cols, &row[&1]) end)
     |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:drop, %Ecto.Migration.Index{columns: cols, table: table}}, _options) do
-    cols
-    |> Enum.reduce(ReQL.table(table), fn col, reql -> ReQL.index_drop(reql, col) end)
+  def execute_ddl(repo, {:drop, %Ecto.Migration.Table{name: table}}, _options) do
+    table
+    |> ReQL.table_drop()
+    |> repo.run()
+    :ok
+  end
+
+  def execute_ddl(repo, {:drop, %Ecto.Migration.Index{columns: [col], table: table}}, _options) do
+    table
+    |> ReQL.table()
+    |> ReQL.index_drop(col)
+    |> repo.run()
+    :ok
+  end
+
+  def execute_ddl(repo, {:drop, %Ecto.Migration.Index{table: table, name: name}}, _options) do
+    table
+    |> ReQL.table()
+    |> ReQL.index_drop(name)
     |> repo.run()
     :ok
   end
@@ -201,10 +227,10 @@ defmodule RethinkDB.Ecto do
 
   defp execute_query(query, repo, {func, fields}, process) do
     case RethinkDB.run(query, repo.__connection__) do
-      {:ok, %RethinkDB.Collection{data: data}} when is_list(data) ->
+      {:ok, %{data: data}} when is_list(data) ->
         {records, count} = Enum.map_reduce(data, 0, &{process_record(&1, process, fields), &2 + 1})
         {count, records}
-      {:ok, %RethinkDB.Record{data: data}} ->
+      {:ok, %{data: data}} ->
         case func do
           :insert_all ->
             {data["inserted"], nil}
@@ -212,7 +238,7 @@ defmodule RethinkDB.Ecto do
             {data["replaced"], nil}
           :delete_all ->
             {data["deleted"], nil}
-          _func ->
+          _else ->
             new_fields = for field <- process, id <- data["generated_keys"], do: {field, id}
             new_fields = Keyword.merge(new_fields, fields)
             {:ok, new_fields}
