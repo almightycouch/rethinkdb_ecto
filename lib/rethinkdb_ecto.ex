@@ -27,6 +27,7 @@ defmodule RethinkDB.Ecto do
 
       defdelegate run(query), to: Connection
       defdelegate run(query, options), to: Connection
+      defdelegate next(collection), to: Connection
 
       def __connection__, do: unquote(module).Connection
       def __config__, do: unquote(Macro.escape(norm_config))
@@ -109,7 +110,6 @@ defmodule RethinkDB.Ecto do
     NormalizedQuery.delete(meta, filters)
     |> execute_query(repo, {:delete, []}, [])
   end
-
 
   #
   # Storage callbacks
