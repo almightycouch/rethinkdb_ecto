@@ -225,7 +225,9 @@ defmodule RethinkDB.Ecto do
      db: Keyword.get(options, :database, "test")]
   end
 
-  defp execute_query(query, repo, {func, fields}, process) do
+  defp execute_query(query, repo, {func, fields}, proc_or_ret) do
+    process   = if is_function(proc_or_ret, 3), do: proc_or_ret
+    returning = if is_list(proc_or_ret),        do: proc_or_ret
     case RethinkDB.run(query, repo.__connection__) do
       {:ok, %{data: data}} when is_list(data) ->
         {records, count} = Enum.map_reduce(data, 0, &{process_result(&1, process, fields), &2 + 1})
@@ -240,8 +242,8 @@ defmodule RethinkDB.Ecto do
             {data["replaced"], nil}
           :delete_all ->
             {data["deleted"], nil}
-          _else when is_list(process) ->
-            new_fields = for field <- process, id <- data["generated_keys"], do: {field, id}
+          _else when is_list(returning) ->
+            new_fields = for field <- returning, id <- data["generated_keys"], do: {field, id}
             new_fields = Keyword.merge(new_fields, fields)
             {:ok, new_fields}
         end
