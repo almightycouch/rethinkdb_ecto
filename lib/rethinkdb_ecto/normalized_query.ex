@@ -198,7 +198,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp distinct(reql, %Query{distinct: %QueryExpr{expr: true}}, _params), do: ReQL.distinct(reql)
   defp distinct(_reql, %Query{distinct: %QueryExpr{expr: expr}}, params) do
     fields = evaluate_arg(expr, params)
-    raise "Can not perform a dictinct on #{inspect fields}, use group_by instead."
+    raise "Can not perform :dictinct on #{inspect fields}, use :group_by instead."
   end
 
   #
