@@ -99,6 +99,14 @@ defmodule RethinkDBEctoTest do
     assert Enum.at(users, 1) == TestRepo.one(from u in User, order_by: u.age, offset: 1, limit: 1)
   end
 
+  test "get single user from composed query" do
+    [user|_] = insert_factory!(User)
+    query = from u in User,  where: u.in_relationship == ^user.in_relationship
+    query = from u in query, where: u.name == ^user.name
+    query = from u in query, select: u.name
+    assert user.name == TestRepo.one(query)
+  end
+
   test "search in user names" do
     users = insert_factory!(User)
     assert               nil == TestRepo.one(from u in User, where:  like(u.name, "m%"))
@@ -193,6 +201,23 @@ defmodule RethinkDBEctoTest do
     from(p in Post, preload: :author)
     |> TestRepo.all()
     |> Enum.each(&assert &1 in posts)
+  end
+
+  test "get post by author name (join via assoc)" do
+    [post|_] = insert_factory!(Post)
+    assert post == TestRepo.one(from(p in Post, join: u in assoc(p, :author), where: u.name == ^post.author.name, preload: [author: u]))
+  end
+
+  test "get post by author name (join via schema)" do
+    [post|_] = insert_factory!(Post)
+    query = from(p in Post, join: u in User, where: u.name == ^post.author.name, preload: [author: u])
+    assert post == TestRepo.one(query)
+  end
+
+  test "select post title and author title for users in relationship" do
+    [post|_] = insert_factory!(Post)
+    query = from(p in Post, join: u in assoc(p, :author), where: u.id == p.author_id and u.in_relationship == true, order_by: [desc: u.age], select: {p.title, u.name})
+    IO.inspect TestRepo.all(query)
   end
 
   #

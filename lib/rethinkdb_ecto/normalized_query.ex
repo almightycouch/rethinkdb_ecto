@@ -56,10 +56,31 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   # JOIN
   #
 
-  defp join(reql, %Query{joins: joins}, params) do
-    Enum.reduce(joins, reql, fn %JoinExpr{on: on, source: {table, _schema}}, reql ->
-      ReQL.inner_join(reql, ReQL.table(table), &evaluate(on.expr, params, [&1, &2]))
-      |> ReQL.map(&[ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")])
+  defp join(reql, %Query{joins: joins, from: {_table, left_schema}}, params) do
+    Enum.reduce(joins, reql, fn %JoinExpr{on: on, source: {table, right_schema}}, reql ->
+      case on.expr do
+        true ->
+          # I assume that true means matching by association,
+          # if it is not the case, we should use inner_join
+          # with the filter function always returning true instead.
+          field =
+            Enum.reduce_while(left_schema.__schema__(:associations), nil, fn assoc, key ->
+              case left_schema.__schema__(:association, assoc) do
+                %Ecto.Association.BelongsTo{related: ^right_schema, owner_key: key} ->
+                  {:halt, key}
+                _else ->
+                  {:cont, key}
+              end
+            end)
+
+          reql
+          |> ReQL.eq_join(field, ReQL.table(table))
+          |> ReQL.map(&[ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")])
+        expr ->
+          reql
+          |> ReQL.inner_join(ReQL.table(table), &evaluate(expr, params, [&1, &2]))
+          |> ReQL.map(&[ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")])
+      end
     end)
   end
 
@@ -328,7 +349,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp evaluate_arg({:^, _, [index]}, params, _records), do: Enum.at(params, index)
   defp evaluate_arg({:^, _, [index, count]}, params, _records), do: Enum.slice(params, index, count)
   defp evaluate_arg({:^, _, args}, _params, _records), do: raise "Unsupported pin arguments: #{inspect args}"
-  defp evaluate_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _params, []), do: field
+  defp evaluate_arg({{:., _, [{:&, _, [_]}, field]}, _, _}, _params, []), do: field
   defp evaluate_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, records), do: ReQL.bracket(Enum.at(records, index), field)
   defp evaluate_arg({_op, _, _args} = expr, params, records), do: evaluate(expr, params, records)
   defp evaluate_arg(expr, _params, _records), do: expr
