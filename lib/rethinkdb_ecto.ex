@@ -58,7 +58,7 @@ defmodule RethinkDB.Ecto do
       usec = trunc((timestamp - secs) * 1_000_000)
       base = :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
       {date, {hour, min, sec}} = :calendar.gregorian_seconds_to_datetime(secs + base)
-      {:ok, Ecto.DateTime.load({date, {hour, min, sec, usec}})}
+      Ecto.DateTime.load({date, {hour, min, sec, usec}})
     end]
   end
 
@@ -262,7 +262,7 @@ defmodule RethinkDB.Ecto do
     end)
   end
 
- defp process_result(record, process, ast) when is_list(record) and is_list(ast) and length(record) == length(ast) do
+ defp process_result(record, process, ast) when is_list(record) and is_list(ast) do
    ast
    |> Enum.zip(record)
    |> Enum.map(fn {ast, field} -> process.(ast, field, nil) end)

@@ -219,7 +219,14 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   defp selectize(reql, groups, args, params) do
+    modref = {:&, [0]}
     fields = Enum.map(args, &evaluate_arg(&1, params))
+    fields =
+      if i = Enum.find_index(fields, & &1 == modref) do
+        [modref|List.delete_at(fields, i)]
+      else
+        fields
+      end
     ReQL.map(reql, fn record ->
       Enum.map(fields, &selectize(reql, record, groups, &1, params))
     end)

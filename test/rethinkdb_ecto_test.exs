@@ -1,4 +1,4 @@
-defmodule RethinkDB.Ecto.Test do
+defmodule RethinkDBEctoTest do
   use ExUnit.Case
 
   import Ecto.Query
@@ -6,15 +6,21 @@ defmodule RethinkDB.Ecto.Test do
   alias Ecto.Integration.TestRepo
   alias RethinkDB.Query, as: ReQL
 
+  #
+  # Schemas
+  #
+
   defmodule User do
     use Ecto.Schema
 
     @primary_key {:id, :binary_id, autogenerate: false}
+    @foreign_key_type :binary_id
 
     schema "users" do
       field :name, :string
       field :age, :integer
       field :in_relationship, :boolean
+      has_many :posts, RethinkDBEctoTest.Post
       timestamps
     end
 
@@ -25,42 +31,51 @@ defmodule RethinkDB.Ecto.Test do
     end
   end
 
+  defmodule Post do
+    use Ecto.Schema
+
+    @primary_key {:id, :binary_id, autogenerate: false}
+    @foreign_key_type :binary_id
+
+    schema "posts" do
+      field :title, :string
+      field :body, :string
+      belongs_to :author, RethinkDBEctoTest.User
+      timestamps
+    end
+  end
+
+  #
+  # Setup
+  #
+
   setup_all do
-    User.__schema__(:source)
-    |> ReQL.table_create()
-    |> TestRepo.run()
-
-    User.__schema__(:source)
-    |> ReQL.table()
-    |> ReQL.index_create(:in_relationship)
-    |> TestRepo.run()
-
-    User.__schema__(:source)
-    |> ReQL.table()
-    |> ReQL.index_wait()
-    |> TestRepo.run()
+    create_table!(User)
+    create_table!(Post)
     :ok
   end
 
   setup do
-    User.__schema__(:source)
-    |> ReQL.table()
-    |> ReQL.delete()
-    |> TestRepo.run()
+    delete_table!(User)
+    delete_table!(Post)
     :ok
   end
 
-  defp insert_factory!(schema), do: Enum.map(schema.factory, &TestRepo.insert!(struct!(schema, &1)))
+  #
+  # Tests
+  #
 
   test "insert, update and delete single user" do
     user_params = List.first(User.factory)
     {:ok, user} =
-      Ecto.Changeset.cast(%User{}, user_params, Map.keys(user_params))
+      %User{}
+      |> Ecto.Changeset.cast(user_params, Map.keys(user_params))
       |> TestRepo.insert
     assert ^user_params = Map.take(user, Map.keys(user_params))
     user_params = Map.put(user_params, :age, 27)
     {:ok, user} =
-      Ecto.Changeset.cast(user, user_params, Map.keys(user_params))
+      user
+      |> Ecto.Changeset.cast(user_params, Map.keys(user_params))
       |> TestRepo.update
     assert ^user_params = Map.take(user, Map.keys(user_params))
     {:ok, user} = TestRepo.delete user
@@ -90,6 +105,11 @@ defmodule RethinkDB.Ecto.Test do
     assert List.first(users) == TestRepo.one(from u in User, where: ilike(u.name, "m%"))
     assert Enum.at(users, 1) == TestRepo.one(from u in User, where: like(u.name, "%x"))
     assert List.delete_at(users, 1) == TestRepo.all(from u in User, where: like(u.name, "%a%"), order_by: u.name)
+  end
+
+  test "select {u.id, u} from each user" do
+    users = Enum.map(insert_factory!(User), &{&1.id, &1})
+    assert users == TestRepo.all(from u in User, select: {u.id, u}, order_by: [desc: u.age])
   end
 
   test "select name from each user" do
@@ -147,4 +167,49 @@ defmodule RethinkDB.Ecto.Test do
          select: {u.in_relationship, avg(u.age)}
     assert {true, 25.5} == TestRepo.one(query)
   end
+
+  test "insert post with author" do
+    [user|_] = insert_factory!(User)
+    {:ok, post} =
+      %Post{}
+      |> Ecto.Changeset.cast(%{title: "Hello world", body: "Lorem ipsum..."}, [:title, :body])
+      |> Ecto.Changeset.put_assoc(:author, user)
+      |> TestRepo.insert
+    assert post.author == user
+  end
+
+  test "preload post author" do
+    [user|_] = insert_factory!(User)
+    {:ok, post} =
+      %Post{}
+      |> Ecto.Changeset.cast(%{title: "Hello world", body: "Lorem ipsum...", author_id: user.id}, [:title, :body, :author_id])
+      |> TestRepo.insert
+    refute Ecto.assoc_loaded?(post.author)
+    assert user == TestRepo.preload(post, :author).author
+  end
+
+  test "get posts and preload authors" do
+    posts = insert_factory!(Post)
+    from(p in Post, preload: :author)
+    |> TestRepo.all()
+    |> Enum.each(&assert &1 in posts)
+  end
+
+  #
+  # Helpers
+  #
+
+  defp create_table!(schema), do: schema.__schema__(:source) |> ReQL.table_create() |> TestRepo.run()
+  defp delete_table!(schema), do: schema.__schema__(:source) |> ReQL.table() |> ReQL.delete() |> TestRepo.run()
+
+  defp insert_factory!(Post) do
+    for user <- insert_factory!(User) do
+      %Post{}
+      |> Ecto.Changeset.cast(%{title: "About me, #{user.name}", body: "Lorem ipsum..."}, [:title, :body])
+      |> Ecto.Changeset.put_assoc(:author, user)
+      |> TestRepo.insert!
+    end
+  end
+
+  defp insert_factory!(schema), do: Enum.map(schema.factory, &TestRepo.insert!(struct!(schema, &1)))
 end
