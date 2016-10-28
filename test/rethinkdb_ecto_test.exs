@@ -159,11 +159,9 @@ defmodule RethinkDBEctoTest do
 
   test "group users by relationship" do
     users = insert_factory!(User)
-    from(u in User, group_by: u.in_relationship, select: {u.in_relationship, u.name})
+    from(u in User, group_by: u.in_relationship, select: {u.in_relationship, count(u.id)})
     |> TestRepo.all()
-    |> Enum.each(fn {r, names} ->
-      assert Enum.sort(names) == Enum.sort(Enum.filter_map(users, & &1.in_relationship == r, & &1.name))
-    end)
+    |> Enum.each(fn {group, count} -> assert count == Enum.count(users, & &1.in_relationship == group) end)
   end
 
   @tag :skip
@@ -212,12 +210,6 @@ defmodule RethinkDBEctoTest do
     [post|_] = insert_factory!(Post)
     query = from(p in Post, join: u in User, where: u.name == ^post.author.name, preload: [author: u])
     assert post == TestRepo.one(query)
-  end
-
-  test "select post title and author title for users in relationship" do
-    [post|_] = insert_factory!(Post)
-    query = from(p in Post, join: u in assoc(p, :author), where: u.id == p.author_id and u.in_relationship == true, order_by: [desc: u.age], select: {p.title, u.name})
-    IO.inspect TestRepo.all(query)
   end
 
   #

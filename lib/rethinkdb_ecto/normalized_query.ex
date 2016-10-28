@@ -110,9 +110,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   defp group_by(reql, %Query{group_bys: groups}, params) do
     Enum.reduce(groups, reql, fn %QueryExpr{expr: expr}, reql ->
-      reql
-      |> ReQL.group(Enum.map(expr, &evaluate_arg(&1, params)))
-      |> ReQL.ungroup()
+      ReQL.group(reql, Enum.map(expr, &evaluate_arg(&1, params)))
     end)
   end
 
@@ -161,52 +159,58 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   #
 
   defp select(reql, %Query{select: nil}, _params), do: reql
+  defp select(reql, %Query{select: %SelectExpr{expr: expr}, assocs: assocs} = q, _params) do
+    group_by? = !Enum.empty?(q.group_bys)
+    assocs    = Enum.map(assocs, &elem(elem(&1, 1), 0))
 
-  # support for list
-  defp select(reql, %Query{select: %SelectExpr{expr: args}, group_bys: groups}, params) when is_list(args) do
-    selectize(reql, groups, args, params)
-  end
+    # In case of a query containing group_by clauses,
+    # we transform the query to return lists of groups.
+    reql =
+      if group_by? do
+        reql
+        |> ReQL.ungroup()
+        |> ReQL.map(&ReQL.bracket(&1, "reduction"))
+      else
+        reql
+      end
 
-  # support for tuple
-  defp select(reql, %Query{select: %SelectExpr{expr: {:{}, _, args}}, group_bys: groups}, params) do
-    selectize(reql, groups, args, params)
-  end
+    # Extracts the aggregator from the expression and
+    # returns both, the new expression and the aggregation function.
+    {expr, aggregate} =
+      case expr do
+        {op, _, expr} when op in [:avg, :count, :max, :min, :sum] ->
+          if op == :count && List.last(expr) == :distinct do
+            expr = List.delete_at(expr, -1)
+            aggr = &ReQL.count(ReQL.distinct(&1))
+            {expr, aggr}
+          else
+            aggr = &apply(ReQL, op, [&1])
+            {expr, aggr}
+          end
+        _ ->
+          {expr, nil}
+      end
 
-  # support for map
-  defp select(reql, %Query{select: %SelectExpr{expr: {:%{}, _, args}}, group_bys: groups}, params) do
-    ReQL.map(reql, fn record ->
-      Enum.into(args, [], fn {_key, expr} ->
-        selectize(reql, record, groups, evaluate_arg(expr, params), params)
+    select =
+      ReQL.map(reql, fn record ->
+        # In order to preload associations we have to
+        # return joins usings their source index.
+        assocs = Enum.map(assocs, &ReQL.bracket(record, &1))
+
+        # Inserts assocs right after the source.
+        # This is a undocumented Ecto requirement.
+        case selectize(record, expr, q) do
+         [source]       ->  source
+         [source|tail]  -> [source|assocs ++ tail]
+          source        -> [source|assocs]
+        end
       end)
-    end)
-  end
 
-  # support for entire model
-  defp select(reql, %Query{select: %SelectExpr{expr: {:&, _, _}}, group_bys: []}, _params), do: reql
-
-  # support for entire model (group_by)
-  defp select(reql, %Query{select: %SelectExpr{expr: {:&, _, _}}, group_bys: _groups}, _params) do
-    ReQL.concat_map(reql, &ReQL.bracket(&1, "reduction"))
-  end
-
-  # support for single field
-  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, _} = expr}, group_bys: []}, params) when not is_atom(op) do
-    ReQL.get_field(reql, evaluate_arg(expr, params))
-  end
-
-  # support for single field (group_by)
-  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, _} = expr}, group_bys: groups}, params) when not is_atom(op) do
-    ReQL.map(reql, &selectize(reql, &1, groups, evaluate_arg(expr, params), params))
-  end
-
-  # support for aggregator
-  defp select(reql, %Query{select: %SelectExpr{expr: {op, _, args}}, group_bys: []}, params) do
-    aggregate(reql, op, args, params)
-  end
-
-  # support for aggregator (group_by)
-  defp select(reql, %Query{select: %SelectExpr{expr: {_, _, _} = expr}, group_bys: groups}, params) do
-    ReQL.map(reql, &selectize(reql, &1, groups, evaluate_arg(expr, params), params))
+    # We apply aggregator only if the query
+    # does not contain any group_by clauses.
+    if aggregate && !group_by?,
+      do: aggregate.(select),
+      else: select
   end
 
   #
@@ -239,55 +243,48 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     |> distinct(query, params)
   end
 
-  defp selectize(reql, groups, args, params) do
-    modref = {:&, [0]}
-    fields = Enum.map(args, &evaluate_arg(&1, params))
-    fields =
-      if i = Enum.find_index(fields, & &1 == modref) do
-        [modref|List.delete_at(fields, i)]
-      else
-        fields
-      end
-    ReQL.map(reql, fn record ->
-      Enum.map(fields, &selectize(reql, record, groups, &1, params))
-    end)
+  defp selectize(record, expr, q) when is_list(expr) do
+    # When selecting {x.foo, x} or any other variant
+    # involving returning x with other values,
+    # we must ensure that x is the first value of the list.
+    this = {:&, [], [0]}
+    expr = if i = Enum.find_index(expr, & &1 == this),
+      do: [this|List.delete_at(expr, i)],
+    else: expr
+    Enum.map(expr, &selectize(record, &1, q))
   end
 
-  defp selectize(reql, record, [], expr, params) do
-    case expr do
-      {:&, _args} ->
-        record
-      {op, args} ->
-        aggregate(reql, op, args, params)
-      field when is_atom(field) ->
-        ReQL.bracket(record, field)
-      value ->
-        value
+  defp selectize(record, {{:., _, expr}, _, _}, q), do: Enum.reduce(expr, record, &selectize(&2, &1, q))
+
+  defp selectize(record, {:{}, _, expr}, q), do: selectize(record, expr, q)
+  defp selectize(record, {:%{}, _, expr}, q), do: selectize(record, Keyword.values(expr), q)
+
+  defp selectize(record, {:&, _, [0]}, %Query{sources: {_}}), do: record
+  defp selectize(record, {:&, _, [index]}, _), do: ReQL.bracket(record, index)
+
+  defp selectize(record, {op, _, [expr]}, q) when op in [:avg, :count, :max, :min, :sum] do
+    record = selectize(record, expr, q)
+    apply(ReQL, op, [record])
+  end
+
+  defp selectize(record, field, q) when is_atom(field) do
+    groups =
+      q.group_bys
+      |> Enum.map(& &1.expr)
+      |> Enum.map(&List.first/1)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 2))
+      |> Enum.map(&List.last/1)
+
+    # If the field is in groups,
+    # we get the first element.
+    if field in groups do
+      record
+      |> ReQL.bracket(field)
+      |> ReQL.bracket(0)
+    else
+      ReQL.bracket(record, field)
     end
-  end
-
-  defp selectize(_reql, record, groups, expr, params) do
-    groups = Enum.flat_map(groups, fn %QueryExpr{expr: expr} -> Enum.map(expr, &evaluate_arg(&1, params)) end)
-    cond do
-      expr in groups ->
-        ReQL.bracket(record, "group")
-      expr ->
-        reduction = ReQL.bracket(record, "reduction")
-        selectize(reduction, reduction, [], expr, params)
-    end
-  end
-
-  defp aggregate(reql, op, args, params) do
-    [field|args] = Enum.map(args, &evaluate_arg(&1, params))
-    aggregate(ReQL.bracket(reql, field), op, List.first(args))
-  end
-
-  defp aggregate(reql, :count, :distinct) do
-    ReQL.distinct(reql) |> ReQL.count()
-  end
-
-  defp aggregate(reql, op, nil) do
-    apply(ReQL, op, [reql])
   end
 
   defp like([field, match], caseless \\ false) do
@@ -349,7 +346,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp evaluate_arg({:^, _, [index]}, params, _records), do: Enum.at(params, index)
   defp evaluate_arg({:^, _, [index, count]}, params, _records), do: Enum.slice(params, index, count)
   defp evaluate_arg({:^, _, args}, _params, _records), do: raise "Unsupported pin arguments: #{inspect args}"
-  defp evaluate_arg({{:., _, [{:&, _, [_]}, field]}, _, _}, _params, []), do: field
+  defp evaluate_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _params, []), do: field
   defp evaluate_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, records), do: ReQL.bracket(Enum.at(records, index), field)
   defp evaluate_arg({_op, _, _args} = expr, params, records), do: evaluate(expr, params, records)
   defp evaluate_arg(expr, _params, _records), do: expr
