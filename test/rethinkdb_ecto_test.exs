@@ -152,6 +152,12 @@ defmodule RethinkDBEctoTest do
     assert 75 == TestRepo.aggregate(User, :sum, :age)
   end
 
+  test "count users and sum their age" do
+    insert_factory!(User)
+    query = from(u in User, select: {count(u.id), sum(u.age)})
+    assert {3, 75} == TestRepo.one(query)
+  end
+
   test "count distinct user relationships" do
     insert_factory!(User)
     assert 2 == TestRepo.one(from u in User, select: count(u.in_relationship, :distinct))

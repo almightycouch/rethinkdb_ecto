@@ -6,6 +6,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   alias RethinkDB.Query, as: ReQL
 
+  @aggregators [:avg, :count, :max, :min, :sum]
+
   def all(query, params) do
     normalize_query(query, params)
   end
@@ -160,57 +162,43 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   defp select(reql, %Query{select: nil}, _params), do: reql
   defp select(reql, %Query{select: %SelectExpr{expr: expr}, assocs: assocs} = q, _params) do
+    assocs    =  Enum.map(assocs, &elem(elem(&1, 1), 0))
     group_by? = !Enum.empty?(q.group_bys)
-    assocs    = Enum.map(assocs, &elem(elem(&1, 1), 0))
+    reducers? = !group_by? &&reducers_only?(q.select)
 
     # In case of a query containing group_by clauses,
     # we transform the query to return lists of groups.
     reql =
-      if group_by? do
-        reql
-        |> ReQL.ungroup()
-        |> ReQL.map(&ReQL.bracket(&1, "reduction"))
+      cond do
+        group_by? ->
+          reql
+          |> ReQL.ungroup()
+          |> ReQL.map(&ReQL.bracket(&1, "reduction"))
+        reducers? ->
+          ReQL.coerce_to(reql, "ARRAY")
+        :else ->
+          reql
+      end
+
+    # Depending on the select term, we build our query differently.
+    # If select contains only aggregators, eg. {count(x.y), sum(x.z)},
+    # we use ReQL.do/2, elsewhise, we use ReQL.map/2.
+    {select, aggregator} =
+      if reducers? do
+        reql = ReQL.do_r(reql, &selectize(&1, expr, q, assocs))
+        reql = ReQL.do_r(reql, &[&1])
+        {reql, nil}
       else
-        reql
+        {expr, aggregator} = get_aggregator(expr)
+        reql = ReQL.map(reql, &selectize(&1, expr, q, assocs))
+        {reql, aggregator}
       end
-
-    # Extracts the aggregator from the expression and
-    # returns both, the new expression and the aggregation function.
-    {expr, aggregate} =
-      case expr do
-        {op, _, expr} when op in [:avg, :count, :max, :min, :sum] ->
-          if op == :count && List.last(expr) == :distinct do
-            expr = List.delete_at(expr, -1)
-            aggr = &ReQL.count(ReQL.distinct(&1))
-            {expr, aggr}
-          else
-            aggr = &apply(ReQL, op, [&1])
-            {expr, aggr}
-          end
-        _ ->
-          {expr, nil}
-      end
-
-    select =
-      ReQL.map(reql, fn record ->
-        # In order to preload associations we have to
-        # return joins usings their source index.
-        assocs = Enum.map(assocs, &ReQL.bracket(record, &1))
-
-        # Inserts assocs right after the source.
-        # This is a undocumented Ecto requirement.
-        case selectize(record, expr, q) do
-         [source]       ->  source
-         [source|tail]  -> [source|assocs ++ tail]
-          source        -> [source|assocs]
-        end
-      end)
 
     # We apply aggregator only if the query
     # does not contain any group_by clauses.
-    if aggregate && !group_by?,
-      do: aggregate.(select),
-      else: select
+    if aggregator && !group_by? && !reducers?,
+      do: aggregator.(select),
+    else: select
   end
 
   #
@@ -243,6 +231,24 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     |> distinct(query, params)
   end
 
+  defp reducers_only?(select) do
+    is_list(select.expr) or elem(select.expr, 0) in [:{}, :%{}] && Enum.all?(select.fields, & elem(&1, 0) in @aggregators)
+  end
+
+  defp selectize(record, expr, q, assocs) do
+    # In order to preload associations we have to
+    # return joins usings their source index.
+    assocs = Enum.map(assocs, &ReQL.bracket(record, &1))
+
+    # Inserts assocs right after the source.
+    # This is a undocumented Ecto requirement.
+    case selectize(record, expr, q) do
+     [source]       ->  source
+     [source|tail]  -> [source|assocs ++ tail]
+      source        -> [source|assocs]
+    end
+  end
+
   defp selectize(record, expr, q) when is_list(expr) do
     # When selecting {x.foo, x} or any other variant
     # involving returning x with other values,
@@ -262,7 +268,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp selectize(record, {:&, _, [0]}, %Query{sources: {_}}), do: record
   defp selectize(record, {:&, _, [index]}, _), do: ReQL.bracket(record, index)
 
-  defp selectize(record, {op, _, [expr]}, q) when op in [:avg, :count, :max, :min, :sum] do
+  defp selectize(record, {op, _, [expr]}, q) when op in @aggregators do
     record = selectize(record, expr, q)
     apply(ReQL, op, [record])
   end
@@ -295,6 +301,22 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     apply(ReQL, :match, [field, regex])
   end
 
+  defp get_aggregator(expr) do
+    case expr do
+      {op, _, expr} when op in @aggregators ->
+        if op == :count && List.last(expr) == :distinct do
+          expr = List.delete_at(expr, -1)
+          aggr = &ReQL.count(ReQL.distinct(&1))
+          {expr, aggr}
+        else
+          aggr = &apply(ReQL, op, [&1])
+          {expr, aggr}
+        end
+      _ ->
+        {expr, nil}
+    end
+  end
+
   defp evaluate({op, _, args}, params, records) do
     args = Enum.map(args, &evaluate_arg(&1, params, records))
     case op do
@@ -312,7 +334,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
       :field  -> apply(ReQL, :bracket, args)
       :like   -> like(args)
       :ilike  -> like(args, true)
-      _ -> {op, args}
+      _else when op in @aggregators ->
+        {op, args}
     end
   end
 
