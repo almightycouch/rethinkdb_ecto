@@ -41,6 +41,21 @@ defmodule RethinkDBEctoTest do
       field :title, :string
       field :body, :string
       belongs_to :author, RethinkDBEctoTest.User
+      has_many :comments, RethinkDBEctoTest.Comment
+      timestamps
+    end
+  end
+
+  defmodule Comment do
+    use Ecto.Schema
+
+    @primary_key {:id, :binary_id, autogenerate: false}
+    @foreign_key_type :binary_id
+
+    schema "comments" do
+      field :body, :string
+      belongs_to :author, RethinkDBEctoTest.User
+      belongs_to :post, RethinkDBEctoTest.Post
       timestamps
     end
   end
@@ -52,12 +67,14 @@ defmodule RethinkDBEctoTest do
   setup_all do
     create_table!(User)
     create_table!(Post)
+    create_table!(Comment)
     :ok
   end
 
   setup do
     delete_table!(User)
     delete_table!(Post)
+    delete_table!(Comment)
     :ok
   end
 
@@ -218,6 +235,36 @@ defmodule RethinkDBEctoTest do
     assert post == TestRepo.one(query)
   end
 
+  test "add comment to post" do
+    [post|_] = insert_factory!(Post)
+    comment = Ecto.build_assoc(post, :comments, body: "Excellent!", author_id: post.id)
+    comment = TestRepo.insert!(comment)
+
+    post = TestRepo.preload(TestRepo.get(Post, post.id), :comments)
+    assert comment == List.first(post.comments)
+  end
+
+  test "get post and preload comments" do
+    comments = insert_factory!(Comment)
+    assert length(comments) ==
+      from(p in Post)
+      |> TestRepo.all()
+      |> TestRepo.preload([:author, :comments])
+      |> Enum.flat_map(& &1.comments)
+      |> Enum.count()
+  end
+
+  test "get post and comments by author name (join via assoc)" do
+    insert_factory!(Comment)
+    query = from p in Post,
+           join: c in assoc(p, :comments),
+           join: u in assoc(p, :author),
+          where: u.name == "Mario",
+        preload: [comments: c]
+    post = TestRepo.one(query)
+    assert 2 == length(post.comments)
+  end
+
   #
   # Helpers
   #
@@ -230,8 +277,22 @@ defmodule RethinkDBEctoTest do
       %Post{}
       |> Ecto.Changeset.cast(%{title: "About me, #{user.name}", body: "Lorem ipsum..."}, [:title, :body])
       |> Ecto.Changeset.put_assoc(:author, user)
-      |> TestRepo.insert!
+      |> TestRepo.insert!()
     end
+  end
+
+  defp insert_factory!(Comment) do
+    posts = insert_factory!(Post)
+    users = TestRepo.all(User)
+    for user <- users, post <- posts do
+      unless user.id == post.author_id do
+        %Comment{}
+        |> Ecto.Changeset.cast(%{body: "Excellent!"}, [:body])
+        |> Ecto.Changeset.put_assoc(:author, user)
+        |> Ecto.Changeset.put_assoc(:post, post)
+        |> TestRepo.insert!()
+      end
+    end |> Enum.filter(& !is_nil(&1))
   end
 
   defp insert_factory!(schema), do: Enum.map(schema.factory, &TestRepo.insert!(struct!(schema, &1)))

@@ -67,8 +67,11 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   # JOIN
   #
 
-  defp join(reql, %Query{joins: joins, from: {_table, left_schema}}, params) do
+  defp join(reql, %Query{joins: []}, _params), do: reql
+  defp join(reql, %Query{joins: joins, from: {_from_table, left_schema}}, params) do
+    init_table = elem(List.first(joins).source, 0)
     Enum.reduce(joins, reql, fn %JoinExpr{on: on, source: {table, right_schema}}, reql ->
+      init = init_table == table
       case on.expr do
         true ->
           # I assume that true means matching by association,
@@ -86,11 +89,11 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
           reql
           |> ReQL.eq_join(field, ReQL.table(table))
-          |> ReQL.map(&[ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")])
+          |> merge_join(init)
         expr ->
           reql
-          |> ReQL.inner_join(ReQL.table(table), &evaluate(expr, params, [&1, &2]))
-          |> ReQL.map(&[ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")])
+          |> ReQL.inner_join(ReQL.table(table), &evaluate_join(&1, &2, expr, params, init))
+          |> merge_join(init)
       end
     end)
   end
@@ -239,24 +242,20 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end
   end
 
-  defp pop_aggregator(expr) do
-    case expr do
-      {op, _, expr} when op in @aggregators ->
-        if op == :count && List.last(expr) == :distinct do
-          expr = List.delete_at(expr, -1)
-          aggr = &ReQL.count(ReQL.distinct(&1))
-          {expr, aggr}
-        else
-          aggr = &apply(ReQL, op, [&1])
-          {expr, aggr}
-        end
-      _ ->
-        {expr, nil}
-    end
+  defp evaluate_join(first, second, expr, params, true) do
+    evaluate(expr, params, [first, second])
   end
 
-  defp reducers_only?(select) do
-    is_list(select.expr) or elem(select.expr, 0) in [:{}, :%{}] && Enum.all?(select.fields, & elem(&1, 0) in @aggregators)
+  defp evaluate_join(first, second, expr, params, false) do
+    ReQL.do_r(ReQL.append(first, second), &evaluate(expr, params, &1))
+  end
+
+  defp merge_join(reql, true) do
+    ReQL.map(reql, &[ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")])
+  end
+
+  defp merge_join(reql, false) do
+    ReQL.map(reql, &ReQL.append(ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")))
   end
 
   defp selectize(record, expr, q, assocs) do
@@ -317,14 +316,6 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end
   end
 
-  defp like([field, match], caseless \\ false) do
-    regex = Regex.escape(match)
-    regex = if String.first(regex) != "%", do: "^" <> regex, else: String.replace_prefix(regex, "%", "")
-    regex = if String.last(regex) != "%", do: regex <> "$", else: String.replace_suffix(regex, "%", "")
-    regex = if caseless, do: "(?i)" <> regex, else: regex
-    apply(ReQL, :match, [field, regex])
-  end
-
   defp evaluate({op, _, args}, params, records) do
     args = Enum.map(args, &normalize_arg(&1, params, records))
     case op do
@@ -371,6 +362,34 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end)
   end
 
+  defp like([field, match], caseless \\ false) do
+    regex = Regex.escape(match)
+    regex = if String.first(regex) != "%", do: "^" <> regex, else: String.replace_prefix(regex, "%", "")
+    regex = if String.last(regex) != "%", do: regex <> "$", else: String.replace_suffix(regex, "%", "")
+    regex = if caseless, do: "(?i)" <> regex, else: regex
+    apply(ReQL, :match, [field, regex])
+  end
+
+  defp pop_aggregator(expr) do
+    case expr do
+      {op, _, expr} when op in @aggregators ->
+        if op == :count && List.last(expr) == :distinct do
+          expr = List.delete_at(expr, -1)
+          aggr = &ReQL.count(ReQL.distinct(&1))
+          {expr, aggr}
+        else
+          aggr = &apply(ReQL, op, [&1])
+          {expr, aggr}
+        end
+      _ ->
+        {expr, nil}
+    end
+  end
+
+  defp reducers_only?(select) do
+    is_list(select.expr) or elem(select.expr, 0) in [:{}, :%{}] && Enum.all?(select.fields, & elem(&1, 0) in @aggregators)
+  end
+
   defp normalize_arg(expr, params, records \\ [])
   defp normalize_arg(%Ecto.Query.Tagged{value: arg}, params, records), do: normalize_arg(arg, params, records)
   defp normalize_arg(args, params, records) when is_list(args), do: Enum.map(args, &normalize_arg(&1, params, records))
@@ -378,7 +397,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp normalize_arg({:^, _, [index, count]}, params, _records), do: Enum.slice(params, index, count)
   defp normalize_arg({:^, _, args}, _params, _records), do: raise "Unsupported pin arguments: #{inspect args}"
   defp normalize_arg({{:., _, [{:&, _, [0]}, field]}, _, _}, _params, []), do: field
-  defp normalize_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, records), do: ReQL.bracket(Enum.at(records, index), field)
+  defp normalize_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, %RethinkDB.Q{} = records), do: ReQL.bracket(ReQL.bracket(records, index), field)
+  defp normalize_arg({{:., _, [{:&, _, [index]}, field]}, _, _}, _params, records) when is_list(records), do: ReQL.bracket(Enum.at(records, index), field)
   defp normalize_arg({_op, _, _args} = expr, params, records), do: evaluate(expr, params, records)
   defp normalize_arg(expr, _params, _records), do: expr
 end
