@@ -28,8 +28,8 @@ defmodule RethinkDB.Ecto do
   on the same connection. Due to the multiplex nature of RethinkDB connections,
   a single connection should do just fine for most use cases.
 
-  The data type of a primary key is a UUID `:binary_id`. If you use the
-  default, you must set the following attributes in your schema definitions:
+  The data type of a primary key is a UUID `:binary_id`. In order to work properly,
+  you must add the following attributes to your schema definitions:
 
       @primary_key {:id, :binary_id, autogenerate: false}
       @foreign_key_type :binary_id
