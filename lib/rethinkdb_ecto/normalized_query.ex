@@ -5,9 +5,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   Most Ecto.Query functions are supported by the RethinkDB.Ecto adapter,
   including queries with aggregations, joins and complex filters and selections.
 
-  Checkout the SQL to ReQL cheat-sheet for more details:
-
-      https://rethinkdb.com/docs/sql-to-reql/
+  For specific implementation details, you should check the source code.
   """
 
   alias Ecto.Query
@@ -17,26 +15,41 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
 
   @aggregators [:avg, :count, :max, :min, :sum]
 
+  @doc """
+  Fetches all entries from the data store matching the given query.
+  """
   def all(query, params) do
     normalize_query(query, params)
   end
 
+  @doc """
+  Inserts a struct or a changeset.
+  """
   def insert(model, fields) do
     from(model)
     |> ReQL.insert(Enum.into(fields, %{}))
   end
 
+  @doc """
+  Inserts all entries into the repository.
+  """
   def insert_all(model, fields) do
     from(model)
     |> ReQL.insert(Enum.map(fields, &Enum.into(&1, %{})))
   end
 
+  @doc """
+  Updates a changeset using its primary key.
+  """
   def update(model, fields, filters) do
     from(model)
     |> ReQL.get(filters[:id])
     |> ReQL.update(Enum.into(fields, %{}))
   end
 
+  @doc """
+  Updates all entries matching the given query with the given values.
+  """
   def update_all(query, params) do
     Enum.reduce(query.updates, normalize_query(query, params), fn %QueryExpr{expr: expr}, reql ->
       Enum.reduce(expr, reql, fn expr, reql ->
@@ -45,12 +58,18 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     end)
   end
 
+  @doc """
+  Deletes a struct using its primary key.
+  """
   def delete(model, filters) do
     from(model)
     |> ReQL.get(filters[:id])
     |> ReQL.delete()
   end
 
+  @doc """
+  Deletes all entries matching the given query.
+  """
   def delete_all(query, params) do
     normalize_query(query, params)
     |> ReQL.delete()

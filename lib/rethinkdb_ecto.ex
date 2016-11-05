@@ -1,4 +1,48 @@
 defmodule RethinkDB.Ecto do
+  @moduledoc """
+  Ecto adapter module for RethinkDB.
+
+  It uses `:rethinkdb` to connect and communicate with a RethinkDB database.
+
+  The adapter tries to serialize SQL-like Ecto queries to the ReQL query
+  language in a performant manner. Lots of the query patterns are inspired
+  by the SQL to ReQL cheat-sheet[1]. If you want to know how a specific
+  function is implemented, look at the `RethinkDB.Ecto.NormalizedQuery` module.
+
+  You can create and drop databases using `mix ecto.create` and `mix.ecto.drop`.
+  Migrations will work for creating tables and indexes. Field specifications are
+  not supported and will be ommited when executing the migration.
+
+  Additionaly, repositories using this adapter can run ReQL queries directly:
+
+      import RethinkDB.{Query, Lambda}
+
+      table("users")
+      |> has_fields(["first_name", "last_name"])
+      |> map(lambda & &1[:first_name] + " " + &1[:last_name])
+      |> MyApp.Repo.run()
+
+  ### Known Limitations
+
+  The adapter does not support connection pooling. All the queries are executed
+  on the same connection. Due to the multiplex nature of RethinkDB connections,
+  a single connection should do just fine for most use cases.
+
+  The data type of a primary key is a UUID `:binary_id`. If you use the
+  default, you must set the following attributes in your schema definitions:
+
+      @primary_key {:id, :binary_id, autogenerate: false}
+      @foreign_key_type :binary_id
+
+  You can set the `:autogenerate` option to `true` if you want to generate
+  primary keys on the client side.
+
+  RethinkDB does not support unique secondary indexes. Indexes can be created
+  normaly using a migration file. When running migrations with unique indexes,
+  you will get a warning. Nevertheless, the index will be created.
+
+  [1]: https://rethinkdb.com/docs/sql-to-reql/
+  """
 
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Storage
@@ -211,9 +255,6 @@ defmodule RethinkDB.Ecto do
   #
 
   def in_transaction?(_repo), do: false
-
-  def rollback(_repo, _value), do:
-    raise BadFunctionError, message: "#{inspect __MODULE__} does not support transactions."
 
   #
   # Helpers
