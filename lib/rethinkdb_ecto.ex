@@ -166,9 +166,9 @@ defmodule RethinkDB.Ecto do
 
     repo.__connection__.start_link(conf)
     case repo.run(ReQL.db_drop(name)) do
-      {:ok, %RethinkDB.Record{data: %{"dbs_dropped" => 1}}} ->
+      %RethinkDB.Record{data: %{"dbs_dropped" => 1}} ->
         :ok
-      {:error, %RethinkDB.Response{data: %{"r" => [error|_]}}} ->
+      %RethinkDB.Response{data: %{"r" => [error|_]}} ->
         raise error
     end
   end
@@ -180,9 +180,9 @@ defmodule RethinkDB.Ecto do
 
     repo.__connection__.start_link(conf)
     case repo.run(ReQL.db_create(name)) do
-      {:ok, %RethinkDB.Record{data: %{"dbs_created" => 1}}} ->
+      %RethinkDB.Record{data: %{"dbs_created" => 1}} ->
         :ok
-      {:error, %RethinkDB.Response{data: %{"r" => [error|_]}}} ->
+      %RethinkDB.Response{data: %{"r" => [error|_]}} ->
         raise error
     end
   end
@@ -270,10 +270,12 @@ defmodule RethinkDB.Ecto do
     process   = if is_function(proc_or_ret, 3), do: proc_or_ret
     returning = if is_list(proc_or_ret),        do: proc_or_ret
     case RethinkDB.run(query, repo.__connection__) do
-      {:ok, %{data: data}} when is_list(data) ->
+      %{data: %{"r" => [error|_]}} ->
+        raise error
+      %{data: data} when is_list(data) ->
         {records, count} = Enum.map_reduce(data, 0, &{process_result(&1, process, fields), &2 + 1})
         {count, records}
-      {:ok, %{data: data}} ->
+      %{data: data} ->
         case func do
           :all when not is_list(data) ->
             {1, [process_result(data, process, fields)]}
@@ -288,8 +290,6 @@ defmodule RethinkDB.Ecto do
             new_fields = Keyword.merge(new_fields, fields)
             {:ok, new_fields}
         end
-      {:error, %RethinkDB.Response{data: %{"r" => [error|_]}}} ->
-        raise error
     end
  end
 
