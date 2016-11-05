@@ -14,7 +14,7 @@ Add `:rethinkdb_ecto` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:rethinkdb_ecto, "~> 0.1"}]
+  [{:rethinkdb_ecto, "~> 0.6"}]
 end
 ```
 
@@ -29,7 +29,69 @@ end
 Finally, in the repository configuration, you will need to specify the `:adapter`:
 
 ```elixir
-config :my_app, Repo,
+config :my_app, MyApp.Repo,
   adapter: RethinkDB.Ecto,
   ...
 ```
+
+## Usage
+
+First, create you repository with `mix ecto.gen.repo` and add the repository to you config:
+
+```elixir
+config :my_app, ecto_repos: [MyApp.Repo]
+```
+
+Start the repository as a supervisor on your application’s supervisor:
+
+```elixir
+def start(_type, _args) do
+  import Supervisor.Spec
+
+  children = [
+    supervisor(MyApp.Repo, [])
+  ]
+
+  opts = [strategy: :one_for_one, name: MyApp.Supervisor]
+  Supervisor.start_link(children, opts)
+end
+```
+
+Define your migrations and schemas then run:
+
+```
+$ mix ecto.create
+$ mix ecto.migrate
+```
+
+You are ready to go.
+
+The adapter supports almost all of `Ecto.Query` functions. This includes group-by and order-by clauses,
+aggregators, ranges, complex filter and select queries, etc.
+
+Start a IEx shell and run a few basic queries:
+
+```elixir
+iex(2)> MyApp.Repo.insert %Post{title: "Ecto is great!"}
+iex(3)> MyApp.Repo.one Post
+```
+
+You can build relationships using `:belongs_to`, `has_one`, `has_many`, etc. in your schema definitions and use them to load associations:
+
+```
+iex(4)> MyApp.Repo.all(Post) |> MyApp.Repo.preload(:comments)
+```
+
+`RethinkDB.Ecto` provides support for `:inner_join` (default), which means that you can preload relationships within a single query:
+
+```elixir
+iex(5)> MyApp.Repo.all from p in Post,
+...(5)>               join: u in assoc(p, :author),
+...(5)>               join: c in assoc(p, :comments),
+...(5)>              where: u.name == "Theresia",
+...(5)>            preload: [author: u, comments: c]
+```
+
+### Limitations
+
+Check the *known limitations*  section in the `RethinkDB.Ecto` documentation.
