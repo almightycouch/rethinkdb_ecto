@@ -92,6 +92,6 @@ iex(5)> MyApp.Repo.all from p in Post,
 ...(5)>            preload: [author: u, comments: c]
 ```
 
-### Limitations
+## Limitations
 
 Check the *known limitations*  section in the `RethinkDB.Ecto` documentation.
