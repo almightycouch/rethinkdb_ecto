@@ -1,4 +1,4 @@
-defmodule RethinkDBNormalizedQueryTest do
+defmodule RethinkDBEctoNormalizedQueryTest do
   use ExUnit.Case
 
   import Ecto.Query
@@ -20,7 +20,7 @@ defmodule RethinkDBNormalizedQueryTest do
       field :name, :string
       field :age, :integer
       field :in_relationship, :boolean
-      has_many :posts, RethinkDBNormalizedQueryTest.Post
+      has_many :posts, RethinkDBEctoNormalizedQueryTest.Post
       timestamps
     end
 
@@ -40,8 +40,8 @@ defmodule RethinkDBNormalizedQueryTest do
     schema "posts" do
       field :title, :string
       field :body, :string
-      belongs_to :author, RethinkDBNormalizedQueryTest.User
-      has_many :comments, RethinkDBNormalizedQueryTest.Comment
+      belongs_to :author, RethinkDBEctoNormalizedQueryTest.User
+      has_many :comments, RethinkDBEctoNormalizedQueryTest.Comment
       timestamps
     end
   end
@@ -54,8 +54,8 @@ defmodule RethinkDBNormalizedQueryTest do
 
     schema "comments" do
       field :body, :string
-      belongs_to :author, RethinkDBNormalizedQueryTest.User
-      belongs_to :post, RethinkDBNormalizedQueryTest.Post
+      belongs_to :author, RethinkDBEctoNormalizedQueryTest.User
+      belongs_to :post, RethinkDBEctoNormalizedQueryTest.Post
       timestamps
     end
   end
