@@ -71,7 +71,6 @@ defmodule RethinkDB.Ecto do
 
       defdelegate run(query), to: Connection
       defdelegate run(query, options), to: Connection
-      defdelegate next(collection), to: Connection
 
       def __connection__, do: unquote(module).Connection
       def __config__, do: unquote(Macro.escape(norm_config))
@@ -164,12 +163,16 @@ defmodule RethinkDB.Ecto do
     conf = repo.__config__
     name = Keyword.get(options, :database, conf[:db])
 
-    repo.__connection__.start_link(conf)
-    case repo.run(ReQL.db_drop(name)) do
+    {:ok, conn} = RethinkDB.Connection.start_link(conf)
+    case RethinkDB.run(ReQL.db_drop(name), conn) do
       %RethinkDB.Record{data: %{"dbs_dropped" => 1}} ->
         :ok
       %RethinkDB.Response{data: %{"r" => [error|_]}} ->
-        raise error
+        if String.ends_with?(error, "does not exist.") do
+          {:error, :already_down}
+        else
+          {:error, error}
+        end
     end
   end
 
@@ -178,12 +181,16 @@ defmodule RethinkDB.Ecto do
     conf = repo.__config__
     name = Keyword.get(options, :database, conf[:db])
 
-    repo.__connection__.start_link(conf)
-    case repo.run(ReQL.db_create(name)) do
+    {:ok, conn} = RethinkDB.Connection.start_link(conf)
+    case RethinkDB.run(ReQL.db_create(name), conn) do
       %RethinkDB.Record{data: %{"dbs_created" => 1}} ->
         :ok
       %RethinkDB.Response{data: %{"r" => [error|_]}} ->
-        raise error
+        if String.ends_with?(error, "already exists.") do
+          {:error, :already_up}
+        else
+          {:error, error}
+        end
     end
   end
 
@@ -255,6 +262,9 @@ defmodule RethinkDB.Ecto do
   #
 
   def in_transaction?(_repo), do: false
+
+  def rollback(_repo, _value), do:
+    raise BadFunctionError, message: "#{inspect __MODULE__} does not support transactions."
 
   #
   # Helpers
