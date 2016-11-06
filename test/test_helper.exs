@@ -26,5 +26,3 @@ end
 
 _   = RethinkDB.Ecto.storage_down(TestRepo.config)
 :ok = RethinkDB.Ecto.storage_up(TestRepo.config)
-
-#:ok = Ecto.Migrator.up(TestRepo, 0, Ecto.Integration.Migration, log: false)
