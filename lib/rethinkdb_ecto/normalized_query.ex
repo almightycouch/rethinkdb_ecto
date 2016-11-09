@@ -185,7 +185,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp select(reql, %Query{select: %SelectExpr{expr: expr}, assocs: assocs} = q, _params) do
     assocs    =  Enum.map(assocs, &elem(elem(&1, 1), 0))
     group_by? = !Enum.empty?(q.group_bys)
-    reducers? = !group_by? &&reducers_only?(q.select)
+    reducers? = !group_by? && reducers_only?(q.select)
 
     # In case of a query containing group_by or aggregation clauses,
     # we transform the query accordingly.
@@ -204,13 +204,17 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     # If select contains only aggregators, eg. {count(x.y), sum(x.z)},
     # we use ReQL.do/2, elsewhise, we use ReQL.map/2.
     {select, aggregator} =
-      if reducers? do
-         reql = ReQL.do_r(reql, &selectize(&1, expr, q, assocs))
-         reql = ReQL.do_r(reql, &[&1])
+      cond do
+      reducers? ->
+        reql = ReQL.do_r(reql, &selectize(&1, expr, q, assocs))
+        reql = ReQL.do_r(reql, &[&1])
         {reql, nil}
-      else
+       fields = take_fields(q.select) ->
+         reql = ReQL.with_fields(reql, fields)
+         {reql, nil}
+      :else ->
         {expr, aggregator} = pop_aggregator(expr)
-         reql = ReQL.map(reql, &selectize(&1, expr, q, assocs))
+        reql = ReQL.map(reql, &selectize(&1, expr, q, assocs))
         {reql, aggregator}
       end
 
@@ -277,6 +281,15 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
     ReQL.map(reql, &ReQL.append(ReQL.bracket(&1, "left"), ReQL.bracket(&1, "right")))
   end
 
+  defp take_fields(%SelectExpr{take: take}) when map_size(take) > 0 do
+    # This function is called only when a select is constructed
+    # with struct(u, [:id, :name]) or it [:id, :name] shortcut.
+    {:any, fields} = take[0]
+    fields
+  end
+
+  defp take_fields(_select_expr), do: nil
+
   defp selectize(record, expr, q, assocs) do
     # In order to preload associations we have to
     # return joins usings their source index.
@@ -308,8 +321,8 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   defp selectize(record, {:%{}, _, expr}, q), do: selectize(record, Keyword.values(expr), q)
 
   defp selectize(record, {:&, _, [0]}, %Query{sources: {_}}), do: record
+  defp selectize(record, {:&, _, [0, fields, count]}, _) when length(fields) == count, do: ReQL.with_fields(record, fields)
   defp selectize(record, {:&, _, [index]}, _), do: ReQL.bracket(record, index)
-
   defp selectize(record, {op, _, [expr]}, q) when op in @aggregators do
     record = selectize(record, expr, q)
     apply(ReQL, op, [record])

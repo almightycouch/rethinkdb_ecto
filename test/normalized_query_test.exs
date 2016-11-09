@@ -148,6 +148,17 @@ defmodule RethinkDBEctoNormalizedQueryTest do
     assert users == TestRepo.all(from u in User, select: %{name: u.name, age: u.age}, order_by: [desc: u.age])
   end
 
+  test "select name and age from users in each user in relationship" do
+    users = insert_factory!(User)
+            |> Enum.filter(& &1.in_relationship == true)
+            |> Enum.map(&struct(User, Map.take(&1, [:name, :age])))
+            |> Enum.map(&put_in(&1.__meta__.state, :loaded))
+    where = [in_relationship: true]
+    order_by = [desc: :age]
+    select = [:name, :age]
+    assert users == TestRepo.all(from User, where: ^where, order_by: ^order_by, select: ^select)
+  end
+
   test "select distinct user relationships" do
     insert_factory!(User)
     [false, true] = TestRepo.all(from u in User, distinct: true, select: u.in_relationship)
