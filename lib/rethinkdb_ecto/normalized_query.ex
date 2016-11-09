@@ -419,7 +419,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   end
 
   defp reducers_only?(select) do
-    is_list(select.expr) or elem(select.expr, 0) in [:{}, :%{}] && Enum.all?(select.fields, & elem(&1, 0) in @aggregators)
+    (is_list(select.expr) || elem(select.expr, 0) in [:{}, :%{}]) && Enum.all?(select.fields, & elem(&1, 0) in @aggregators)
   end
 
   defp normalize_arg(expr, params, records \\ [])
