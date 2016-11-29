@@ -173,6 +173,8 @@ defmodule RethinkDB.Ecto do
         else
           {:error, error}
         end
+      %RethinkDB.Exception.ConnectionClosed{} ->
+        {:error, :connection_closed}
     end
   end
 
@@ -191,6 +193,8 @@ defmodule RethinkDB.Ecto do
         else
           {:error, error}
         end
+      %RethinkDB.Exception.ConnectionClosed{} ->
+        {:error, :connection_closed}
     end
   end
 
