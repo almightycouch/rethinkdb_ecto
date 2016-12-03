@@ -57,7 +57,27 @@ def start(_type, _args) do
 end
 ```
 
-Define your migrations and schemas then run:
+Define your schemas and migrations:
+
+```elixir
+defmodule User do
+  use Ecto.Schema
+
+  # You must define your primary-key and foreign-key types as :binary_id
+  @primary_key {:id, :binary_id, autogenerate: false}
+  @foreign_key_type :binary_id
+
+  schema "users" do
+    field :name, :string
+    field :age, :integer
+    has_many :posts, Post
+    timestamps
+  end
+end
+```
+
+
+Create the database and apply migrations:
 
 ```
 $ mix ecto.create
