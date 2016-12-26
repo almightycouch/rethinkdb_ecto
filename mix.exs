@@ -39,7 +39,7 @@ defmodule RethinkDB.Ecto.Mixfile do
   end
 
   defp deps do
-    [{:ecto, "~> 2.0"},
+    [{:ecto, "~> 2.1"},
      {:rethinkdb, "~> 0.4"},
      {:ex_doc, "~> 0.14", only: :dev},
      {:earmark, ">= 0.0.0", only: :dev}]

@@ -72,6 +72,8 @@ defmodule RethinkDB.Ecto do
       defdelegate run(query), to: Connection
       defdelegate run(query, options), to: Connection
 
+      def in_transaction?, do: false
+
       def __connection__, do: unquote(module).Connection
       def __config__, do: unquote(Macro.escape(norm_config))
     end
@@ -95,13 +97,11 @@ defmodule RethinkDB.Ecto do
 
   def loaders(:uuid, _type), do: [&Ecto.UUID.dump/1]
 
-  def loaders(:datetime, _type) do
+  def loaders(:naive_datetime, _type) do
     [fn %RethinkDB.Pseudotypes.Time{epoch_time: timestamp, timezone: _timezone} ->
       secs = trunc(timestamp)
-      usec = trunc((timestamp - secs) * 1_000_000)
       base = :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
-      {date, {hour, min, sec}} = :calendar.gregorian_seconds_to_datetime(secs + base)
-      Ecto.DateTime.load({date, {hour, min, sec, usec}})
+      NaiveDateTime.from_erl(:calendar.gregorian_seconds_to_datetime(secs + base))
     end]
   end
 
@@ -109,7 +109,7 @@ defmodule RethinkDB.Ecto do
 
   def dumpers(:uuid, type), do: [type, &Ecto.UUID.load/1]
 
-  def dumpers(:datetime, type) do
+  def dumpers(:naive_datetime, type) do
     [type, fn {{year, month, day}, {hour, min, sec, usec}} ->
       base = :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
       epoch_time = :calendar.datetime_to_gregorian_seconds({{year, month, day}, {hour, min, sec}}) - base
@@ -127,7 +127,7 @@ defmodule RethinkDB.Ecto do
     |> execute_query(repo, {func, meta.fields}, preprocess)
   end
 
-  def insert(repo, meta, fields, returning, _options) do
+  def insert(repo, meta, fields, _on_conflict, returning, _options) do
     returning =
       unless meta.schema.__schema__(:autogenerate_id) && meta.schema.__schema__(:primary_key) in returning do
         returning ++ meta.schema.__schema__(:primary_key)
@@ -139,7 +139,7 @@ defmodule RethinkDB.Ecto do
     |> execute_query(repo, {:insert, fields}, returning)
   end
 
-  def insert_all(repo, meta, _header, fields, returning, _options) do
+  def insert_all(repo, meta, _header, fields, _on_conflict, returning, _options) do
     NormalizedQuery.insert_all(meta, fields)
     |> execute_query(repo, {:insert_all, fields}, returning)
   end

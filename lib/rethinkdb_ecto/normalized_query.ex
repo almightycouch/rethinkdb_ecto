@@ -9,7 +9,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   """
 
   alias Ecto.Query
-  alias Ecto.Query.{QueryExpr, SelectExpr, JoinExpr}
+  alias Ecto.Query.{BooleanExpr, QueryExpr, SelectExpr, JoinExpr}
 
   alias RethinkDB.Query, as: ReQL
 
@@ -122,7 +122,7 @@ defmodule RethinkDB.Ecto.NormalizedQuery do
   #
 
   defp where(reql, %Query{wheres: wheres, sources: sources}, params) do
-    Enum.reduce(wheres, reql, fn %QueryExpr{expr: expr}, reql ->
+    Enum.reduce(wheres, reql, fn %BooleanExpr{expr: expr}, reql ->
       ReQL.filter(reql, &evaluate(expr, params, resolve(&1, sources)))
     end)
   end
