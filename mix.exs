@@ -8,12 +8,12 @@ defmodule RethinkDB.Ecto.Mixfile do
      name: "RethinkDB.Ecto",
      version: @version,
      elixir: "~> 1.3",
-     package: package,
-     description: description,
+     package: package(),
+     description: description(),
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
-     docs: docs,
-     deps: deps]
+     docs: docs(),
+     deps: deps()]
   end
 
   def application do
