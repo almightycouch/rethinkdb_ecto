@@ -7,7 +7,7 @@ defmodule RethinkDB.Ecto.Mixfile do
     [app: :rethinkdb_ecto,
      name: "RethinkDB.Ecto",
      version: @version,
-     elixir: "~> 1.3",
+     elixir: "~> 1.4",
      package: package(),
      description: description(),
      build_embedded: Mix.env == :prod,
@@ -17,7 +17,7 @@ defmodule RethinkDB.Ecto.Mixfile do
   end
 
   def application do
-    [applications: [:logger, :ecto, :rethinkdb]]
+    [extra_applications: [:logger]]
   end
 
   defp package do
@@ -41,8 +41,6 @@ defmodule RethinkDB.Ecto.Mixfile do
   defp deps do
     [{:ecto, "~> 2.1"},
      {:rethinkdb, "~> 0.4"},
-     {:ex_doc, "~> 0.14", only: :dev},
-     {:earmark, ">= 0.0.0", only: :dev}]
-
+     {:ex_doc, "~> 0.15", only: :dev, runtime: false}]
   end
 end

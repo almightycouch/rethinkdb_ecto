@@ -14,14 +14,13 @@ defmodule RethinkDBEctoNormalizedQueryTest do
     use Ecto.Schema
 
     @primary_key {:id, :binary_id, autogenerate: false}
-    @foreign_key_type :binary_id
 
     schema "users" do
       field :name, :string
       field :age, :integer
       field :in_relationship, :boolean
       has_many :posts, RethinkDBEctoNormalizedQueryTest.Post
-      timestamps
+      timestamps()
     end
 
     def factory do
@@ -42,7 +41,7 @@ defmodule RethinkDBEctoNormalizedQueryTest do
       field :body, :string
       belongs_to :author, RethinkDBEctoNormalizedQueryTest.User
       has_many :comments, RethinkDBEctoNormalizedQueryTest.Comment
-      timestamps
+      timestamps()
     end
   end
 
@@ -56,7 +55,7 @@ defmodule RethinkDBEctoNormalizedQueryTest do
       field :body, :string
       belongs_to :author, RethinkDBEctoNormalizedQueryTest.User
       belongs_to :post, RethinkDBEctoNormalizedQueryTest.Post
-      timestamps
+      timestamps()
     end
   end
 
