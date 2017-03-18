@@ -18,14 +18,6 @@ def deps do
 end
 ```
 
-Ensure `:rethinkdb_ecto` is started before your application:
-
-```elixir
-def application do
-  [applications: [:rethinkdb_ecto]]
-end
-```
-
 Finally, in the repository configuration, you will need to specify the `:adapter`:
 
 ```elixir
