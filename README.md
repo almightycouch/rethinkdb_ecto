@@ -92,7 +92,7 @@ iex(3)> MyApp.Repo.one Post
 
 You can build relationships using `:belongs_to`, `has_one`, `has_many`, etc. in your schema definitions and use them to load associations:
 
-```
+```elixir
 iex(4)> MyApp.Repo.all(Post) |> MyApp.Repo.preload(:comments)
 ```
 
