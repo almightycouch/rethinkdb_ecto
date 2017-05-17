@@ -51,7 +51,7 @@ defmodule RethinkDB.Ecto do
   on the same connection. Due to the multiplex nature of RethinkDB connections,
   a single connection should do just fine for most use cases.
 
-  #### Table Primary-Key
+  #### Primary Keys
 
   The data type of a primary key is a UUID `:binary_id`. In order to work properly,
   you must add the following attributes to your schema definitions:
@@ -62,10 +62,9 @@ defmodule RethinkDB.Ecto do
   You can set the `:autogenerate` option to `true` if you want to generate
   primary keys on the client side.
 
-  #### Unique Index
+  #### Unique Indexes
 
-  `RethinkDB` does not support unique secondary indexes. Indexes can be created
-  normaly using a migration file. When running migrations with unique indexes,
+  `RethinkDB` does not support unique secondary indexes. When running migrations with unique indexes,
   you will get a warning. Nevertheless, the index will be created.
 
   [1]: https://rethinkdb.com/docs/sql-to-reql/
