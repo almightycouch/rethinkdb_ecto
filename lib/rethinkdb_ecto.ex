@@ -218,20 +218,20 @@ defmodule RethinkDB.Ecto do
     :ok
   end
 
-  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: [col], table: table, name: name, unique: unique}}, options) do
+  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: [col], table: table, name: name, unique: unique, options: index_opts}}, options) do
     if options[:log] && unique, do: Logger.warn "#{inspect __MODULE__} cannot create unique index #{inspect name} for table #{inspect table}."
     table
     |> ReQL.table()
-    |> ReQL.index_create(col)
+    |> ReQL.index_create(col, Keyword.take(index_opts || [], [:multi, :geo]))
     |> repo.run()
     :ok
   end
 
-  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: cols, table: table, name: name, unique: unique}}, options) do
+  def execute_ddl(repo, {:create, %Ecto.Migration.Index{columns: cols, table: table, name: name, unique: unique, options: index_opts}}, options) do
     if options[:log] && unique, do: Logger.warn "#{inspect __MODULE__} cannot create unique index #{inspect name} for table #{inspect table}."
     table
     |> ReQL.table()
-    |> ReQL.index_create(name, lambda fn(row) -> Enum.map(cols, &row[&1]) end)
+    |> ReQL.index_create(name, lambda(fn(row) -> Enum.map(cols, &row[&1]) end), Keyword.take(index_opts || [], [:multi, :geo]))
     |> repo.run()
     :ok
   end
