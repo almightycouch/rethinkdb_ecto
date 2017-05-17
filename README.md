@@ -16,7 +16,7 @@ Add `:rethinkdb_ecto` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:rethinkdb_ecto, "~> 0.6"}]
+  [{:rethinkdb_ecto, "~> 0.7"}]
 end
 ```
 
