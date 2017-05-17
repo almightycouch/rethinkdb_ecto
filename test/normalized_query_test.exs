@@ -227,7 +227,7 @@ defmodule RethinkDBEctoNormalizedQueryTest do
   end
 
   test "insert post with tags" do
-    {:ok, _post} = TestRepo.insert(%Post{title: "Hello world", body: "Lorem ipsum...", tags: [%Tag{name: "hello"}, %Tag{name: "world"}]})
+    {:ok, post} = TestRepo.insert(%Post{title: "Hello world", body: "Lorem ipsum...", tags: [%Tag{name: "hello"}, %Tag{name: "world"}]})
     assert ["hello", "world"] == Enum.map(post.tags, & &1.name)
 
     {:ok, post} =
