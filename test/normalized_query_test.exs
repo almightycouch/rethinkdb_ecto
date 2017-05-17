@@ -41,6 +41,7 @@ defmodule RethinkDBEctoNormalizedQueryTest do
       field :body, :string
       belongs_to :author, RethinkDBEctoNormalizedQueryTest.User
       has_many :comments, RethinkDBEctoNormalizedQueryTest.Comment
+      embeds_many :tags, RethinkDBEctoNormalizedQueryTest.Tag
       timestamps()
     end
   end
@@ -59,6 +60,14 @@ defmodule RethinkDBEctoNormalizedQueryTest do
     end
   end
 
+  defmodule Tag do
+    use Ecto.Schema
+
+    embedded_schema do
+      field :name, :string
+    end
+  end
+
   #
   # Setup
   #
@@ -71,9 +80,9 @@ defmodule RethinkDBEctoNormalizedQueryTest do
   end
 
   setup do
-    delete_table!(User)
-    delete_table!(Post)
-    delete_table!(Comment)
+    clear_table!(User)
+    clear_table!(Post)
+    clear_table!(Comment)
     :ok
   end
 
@@ -217,6 +226,18 @@ defmodule RethinkDBEctoNormalizedQueryTest do
     assert post.author == user
   end
 
+  test "insert post with tags" do
+    {:ok, _post} = TestRepo.insert(%Post{title: "Hello world", body: "Lorem ipsum...", tags: [%Tag{name: "hello"}, %Tag{name: "world"}]})
+    assert ["hello", "world"] == Enum.map(post.tags, & &1.name)
+
+    {:ok, post} =
+      %Post{}
+      |> Ecto.Changeset.cast(%{title: "Hello world", body: "Lorem ipsum...", tags: [%{name: "hello"}, %{name: "world"}]}, [:title, :body])
+      |> Ecto.Changeset.cast_embed(:tags, with: &Ecto.Changeset.cast(&1, &2, [:name]))
+      |> TestRepo.insert
+    assert ["hello", "world"] == Enum.map(post.tags, & &1.name)
+  end
+
   test "preload post author" do
     [user|_] = insert_factory!(User)
     {:ok, post} =
@@ -280,7 +301,7 @@ defmodule RethinkDBEctoNormalizedQueryTest do
   #
 
   defp create_table!(schema), do: schema.__schema__(:source) |> ReQL.table_create() |> TestRepo.run()
-  defp delete_table!(schema), do: schema.__schema__(:source) |> ReQL.table() |> ReQL.delete() |> TestRepo.run()
+  defp clear_table!(schema), do: schema.__schema__(:source) |> ReQL.table() |> ReQL.delete() |> TestRepo.run()
 
   defp insert_factory!(Post) do
     for user <- insert_factory!(User) do
