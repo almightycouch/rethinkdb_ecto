@@ -133,6 +133,12 @@ defmodule RethinkDB.Ecto do
     end]
   end
 
+  def loaders(:float, type) do
+    [fn num when is_float(num)   -> {:ok, num}
+        num when is_integer(num) -> {:ok, num / 1}
+    end]
+  end
+
   def loaders(_primitive, type), do: [type]
 
   def dumpers(:uuid, type), do: [type, &Ecto.UUID.load/1]

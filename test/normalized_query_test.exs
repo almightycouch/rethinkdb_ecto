@@ -39,6 +39,7 @@ defmodule RethinkDBEctoNormalizedQueryTest do
     schema "posts" do
       field :title, :string
       field :body, :string
+      field :score, :float, default: 0.0
       belongs_to :author, RethinkDBEctoNormalizedQueryTest.User
       has_many :comments, RethinkDBEctoNormalizedQueryTest.Comment
       embeds_many :tags, RethinkDBEctoNormalizedQueryTest.Tag
@@ -229,7 +230,6 @@ defmodule RethinkDBEctoNormalizedQueryTest do
   test "insert post with tags" do
     {:ok, post} = TestRepo.insert(%Post{title: "Hello world", body: "Lorem ipsum...", tags: [%Tag{name: "hello"}, %Tag{name: "world"}]})
     assert ["hello", "world"] == Enum.map(post.tags, & &1.name)
-
     {:ok, post} =
       %Post{}
       |> Ecto.Changeset.cast(%{title: "Hello world", body: "Lorem ipsum...", tags: [%{name: "hello"}, %{name: "world"}]}, [:title, :body])
@@ -294,6 +294,19 @@ defmodule RethinkDBEctoNormalizedQueryTest do
         preload: [comments: c]
     post = TestRepo.one(query)
     assert 2 == length(post.comments)
+  end
+
+  test "ensures score is always loaded as :float, even if it is stored internally as :integer" do
+    {:ok, post} = TestRepo.insert(%Post{title: "Hello world", body: "Lorem ipsum..."})
+    assert post.score == 0.0
+    assert post == TestRepo.get(Post, post.id)
+    {:ok, post} =
+      post
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.put_change(:score, 1.0)
+      |> TestRepo.update
+    assert post.score == 1.0
+    assert post == TestRepo.get(Post, post.id)
   end
 
   #
