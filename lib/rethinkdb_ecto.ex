@@ -147,7 +147,7 @@ defmodule RethinkDB.Ecto do
     [type, fn {{year, month, day}, {hour, min, sec, usec}} ->
       base = :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
       epoch_time = :calendar.datetime_to_gregorian_seconds({{year, month, day}, {hour, min, sec}}) - base
-      {:ok, %RethinkDB.Pseudotypes.Time{epoch_time: epoch_time + usec / 1_000, timezone: "+00:00"}}
+      {:ok, %RethinkDB.Pseudotypes.Time{epoch_time: epoch_time + usec / 1_000_000, timezone: "+00:00"}}
     end]
   end
 
